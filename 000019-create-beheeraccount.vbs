@@ -40,9 +40,28 @@
 ''		Sub ScriptRun
 
 
+
 Option Explicit
 
 
+
+Const	TBL_NWA	= 				"new_account"
+Const	FLD_NWA_ID =			"new_account_id"
+Const	FLD_NWA_FNAME = 		"first_name"
+Const	FLD_NWA_MNAME = 		"middle_name"
+Const	FLD_NWA_LNAME = 		"last_name"
+Const	FLD_NWA_COMP = 			"company"
+Const	FLD_NWA_MOBILE = 		"mobile"
+Const	FLD_NWA_DOMAIN = 		"ad_domain"
+Const	FLD_NWA_USERNAME = 		"user_name"
+Const	FLD_NWA_USERNAME_SAME = "user_name_same"
+Const	FLD_NWA_MAIL = 			"mail"
+Const	FLD_NWA_PASSWORD = 		"password"
+Const	FLD_NWA_REF = 			"reference_number"
+Const	FLD_NWA_REQ_MAIL = 		"requestor_mail"
+Const	FLD_NWA_STATUS = 		"status"
+Const	FLD_NWA_RCD = 			"rcd"
+Const	FLD_NWA_RLU = 			"rlu"
 
 Const	MAX_ACCOUNT_LEN		=	20
 
@@ -64,17 +83,10 @@ Dim		gobjSheet
 Dim		gobjFso
 Dim		gobjFile
 Dim		gstrDomainDns
-Dim		gobjSplunkLog
+''Dim		gobjSplunkLog
 Dim		gobjShell
 Dim		tfNewAccount		'	Text File New Account; write all actions in this file.
-
-
-
-Call ScriptInit()
-'Call ScriptTest()
-Call ScriptRun()
-Call ScriptDone()
-WScript.Quit()
+Dim		db		''	Global object to connect to the database
 
 
 
@@ -109,6 +121,11 @@ Sub	ScriptInit()
 	'' Setup class with the correct information
 	'gobjSplunkLog.SetLogPath(gobjSplunkLog.GetServerShare() & "\[SCRIPTNAME]\[DOMAINNETBIOS]\[COMPUTERNAME]\[YYYY-MM-DD]\[HH-MM-SS].log")
 	' gobjSplunkLog.OpenFile()
+	
+	Set db = New ClassMySQL
+	db.DbOpen("DSN_ADBEHEER")
+	
+	WScript.Echo "Is the database open: " & db.Status
 End Sub
 
 
@@ -146,25 +163,28 @@ Sub ScriptRun()
 	Dim		strPreWin2000
 	Dim		strRequestedBy
 	
+	Dim		qs			'' Query Select
+	Dim		rs			'' RecordSet
+	
 	WScript.Echo 
 	
-	On Error Resume Next
-	gobjFso.DeleteFile GetScriptPath & "RUNON*.CMD", True
+	''On Error Resume Next
+	''gobjFso.DeleteFile GetScriptPath & "RUNON*.CMD", True
 	
-	intRow = 10		' First row of the information in Excel
+	'' intRow = 10		' First row of the information in Excel
 	
 	' Loop until a empty line is found.
-	Do Until gobjExcel.Cells(intRow, 1).Value = ""
-		strFirstName = Trim(gobjExcel.Cells(intRow, COL_FIRST).Value)
-		strMiddleName = Trim(gobjExcel.Cells(intRow, COL_MIDDLE).Value)
-		strLastName = Trim(gobjExcel.Cells(intRow, COL_LAST).Value)
-		strCompany = Trim(gobjExcel.Cells(intRow, COl_COMP).Value)
-		strTitle = Trim(gobjExcel.Cells(intRow, COL_TITLE).Value)
-		strSameAs = Trim(gobjExcel.Cells(intRow, COL_SAME).Value)
-		strRootDseXls = Trim(gobjExcel.Cells(intRow, COL_DOMAIN).Value)
-		strArgusCall = Trim(gobjExcel.Cells(intRow, COL_ARGUS).Value)
-		strMobile = Trim(gobjExcel.Cells(intRow, COL_MOBILE).Value)
-		strRequestedBy = Trim(gobjExcel.Cells(intRow, COL_REQUEST_BY).Value)
+	'' Do Until gobjExcel.Cells(intRow, 1).Value = ""
+		''strFirstName = Trim(gobjExcel.Cells(intRow, COL_FIRST).Value)
+		''strMiddleName = Trim(gobjExcel.Cells(intRow, COL_MIDDLE).Value)
+		''strLastName = Trim(gobjExcel.Cells(intRow, COL_LAST).Value)
+		'strCompany = Trim(gobjExcel.Cells(intRow, COl_COMP).Value)
+		'strTitle = Trim(gobjExcel.Cells(intRow, COL_TITLE).Value)
+		'strSameAs = Trim(gobjExcel.Cells(intRow, COL_SAME).Value)
+		'strRootDseXls = Trim(gobjExcel.Cells(intRow, COL_DOMAIN).Value)
+		'strArgusCall = Trim(gobjExcel.Cells(intRow, COL_ARGUS).Value)
+		' strMobile = Trim(gobjExcel.Cells(intRow, COL_MOBILE).Value)
+		'strRequestedBy = Trim(gobjExcel.Cells(intRow, COL_REQUEST_BY).Value)
 		'strAccountName = GenerateAccountName(strCompany, strFirstName, strMiddleName, strLastName)
 		
 		'strDomainDns = ConfigReadSettingSection(strRootDseXls, "Upn")
@@ -191,7 +211,7 @@ Sub ScriptRun()
 		'	-upn "KPN_Joop.deCock@test.ns.nl" 
 		'	-mustchpwd yes
 		
-		Call CreateNewAccount(strFirstName, strMiddleName, strLastName, strCompany, strTitle, strMobile, strSameAs, strRootDseXls, strArgusCall, strRequestedBy)
+		'Call CreateNewAccount(strFirstName, strMiddleName, strLastName, strCompany, strTitle, strMobile, strSameAs, strRootDseXls, strArgusCall, strRequestedBy)
 		
 		
 		'gobjFile.WriteLine
@@ -241,8 +261,27 @@ Sub ScriptRun()
 		
 		'gobjFile.Close
 		'Set gobjFile = Nothing
-		intRow = intRow + 1
-	Loop
+		'intRow = intRow + 1
+	'Loop
+	
+	'' Build a select query to get all records with status 0 (all new records)
+	qs = "SELECT * "
+	qs = qs & "FROM " & TBL_NWA & " "
+	qs = qs & "WHERE " & FLD_NWA_STATUS & "=0;"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		WScript.Echo "NO RECORDS FOUND " & qs
+		
+	Else
+		WScript.Echo "RECORDS FOUND " & qs
+		rs.MoveFirst
+		While Not rs.EOF
+			WScript.Echo rs(FLD_NWA_ID).Value
+			rs.MoveNext                                        'next foudn object 
+		Wend
+		Set rs = Nothing
+	End If
 End Sub ' ScriptRun
 
 
@@ -250,6 +289,10 @@ Sub ScriptDone()
 	'' close the class SplunkLog
 	'Set gobjSplunkLog = Nothing
 
+	'' Close the database object
+	db.DbClose
+	Set db = Nothing
+	
 	Set gobjShell = Nothing
 	
 	Set gobjFso = Nothing
@@ -257,7 +300,6 @@ Sub ScriptDone()
 	Set gobjSheet = Nothing
 	
 	gobjExcel.Quit
-	
 	
 	Set gobjExcel = Nothing
 End Sub
@@ -972,6 +1014,10 @@ End Function '' GetScriptName
 
 
 
+
+
+
+
 Class ClassTextFile
 	'
 	'	General class to handle file operations for text files .
@@ -1147,6 +1193,443 @@ Class ClassTextFile
 	End Function
 
 End Class	'	ClassTextFile
+
+
+
+
+
+Class ClassMySQL
+	'
+	'	Versie 02
+	'
+	'	Class_Initialize()		Private Sub			Class initializer
+	'	Class_Terminate()		Private Sub			Class terminator
+	'	DbOpen					Public Sub			Open the database en setup database object
+	'	DbOpenDsn				Public Sub			Open the database using a Data Source Name (DSN)
+	'	DbClose					Public Sub			Close the database en close all open handles, kill database object
+	'	FixStr(strText)			Public Function		Fix a string to a format to be used in a query
+	'	FixBool(blnValue)		Public Function 	Fix a VBScript True or False to INTEGER 0 or 1 to be used in MySQL
+	'	FixDtm(strText)			Public Function		Fix a date time string to a proper format e.g. YYY-MM-DD HH:MM:SS
+	'	ExecQuery(strQuery)		Public Function		Run a query
+	'	UniqueRecordId			Public Function		Generate a new unique record id in the format: 13306761B8CC03AF (16 chars long)
+	'	NumberAlign(intNumber, intLen)
+	'							Private Function 	Align a number on the length (NumberAlign(2, 3) > 2 becomes 002)
+	'	GetRecCount				Public Function		Return the number of records in a table.
+	'	ClearTable(strTable)	Public Sub			Delete all rows from a table.
+	'
+
+	
+	Private strDatabase
+	Private strServer
+	Private strUser
+	Private strPassword
+	Private objDb
+	Private blnIsOpen
+	Private strUniqueRecId
+
+	
+	Private Sub Class_Initialize()
+		strDatabase = ""
+		strServer = ""
+		strUser = ""
+		strPassword = ""
+		blnIsOpen = False
+	End Sub
+
+	
+	Private Sub Class_Terminate()
+		blnIsOpen = False
+	End Sub
+	
+	
+	Public Sub DbOpen(ByVal strDataSourceName)
+		Dim	strConnector
+		
+		''strDatabase = strDatabaseNew
+		''strServer = strServerNew
+		''strUser = strUserNew
+		''strPassword = strPasswordNew
+		''strUniqueRecId = UniqueRecordId()
+		
+		''strConnector = "|={MySQL ODBC 5.1 Driver};" & _
+		''"Server=" & strServer & ";" & _
+		''"Database=" & strDatabase & ";" & _
+		''"User=" & strUser & ";" &_
+	 	''"Password=" & strPassword & ";" & _
+		''"Option=3;"
+		
+		Set objDb = CreateObject("ADODB.Connection")
+		On Error Resume Next
+		objDb.Open "DSN=" & strDataSourceName
+		If Err.Number <> 0 Then
+			WScript.Echo "ERROR opening DSN " & strDataSourceName & " (" & Err.Description & ")"
+			WScript.Quit(Err.Number)
+			''Call DbClose()
+		End If
+		
+		blnIsOpen = True
+	End Sub
+	
+	
+	Public Sub DbOpenDsn(ByVal strDsn)
+		Set objDb = CreateObject("ADODB.Connection")
+		On Error Resume Next
+		objDb.Open strDsn
+		If Err.Number <> 0 Then
+			WScript.Echo "ERROR opening " & strDsn & " (" & Err.Description & ")"
+			Call DbClose()
+		End If
+		
+		blnIsOpen = True
+	End Sub
+	
+	
+	Public Sub DbClose
+		If blnIsOpen = True Then
+			objDb.Close
+			Set objDb = Nothing
+		End If
+	End Sub
+	
+	
+	Public Function Status()
+		Status = blnIsOpen
+		'WScript.Echo "Current status of the database " & UCase(strDatabase) & " on server " & strServer & ": " & blnIsOpen
+	End Function
+
+	
+	Public Function FixInt(ByVal intNumber)
+		If IsNull(intNumber) Then
+			FixInt = 0
+		Else
+			FixInt = intNumber
+		End If
+	End Function
+	
+	
+	Public Function FixStr(ByVal strText)
+		'
+		'	Returns a string suitable for a SQL query, Attach quote's around it and replace
+		'	single quote (') by double quote's ('')
+		'
+		'	Variables:
+		'		strText
+		'	
+		'	Returns:
+		'		A string suitable for using in a SQL query
+		' 
+		Dim	strBuffer
+	
+		If IsNull(strText) Or Len(strText) = 0 Then
+			strBuffer = "Null"
+		Else
+			strBuffer = strText
+			strBuffer = Replace(strBuffer, "'", "''")
+			strBuffer = Replace(strBuffer, "\", "\\")
+			strBuffer = "'" & strBuffer & "'"
+		End If
+		FixStr = strBuffer
+	End Function ' FixStr
+	
+
+	Public Function FixBool(ByVal blnValue)
+		'
+		'	Fix the boolean value (true or False) from VBScript (language specific) to its SQL equavaliant (0 or 1)
+		'	MySQL doesn't have a boolean field. Use INTEGER instead. This function converts the data
+		
+		Dim	 blnReturn
+		If blnValue = True Then
+			intReturn = 1
+		Else
+			intReturn  = 0
+		End If
+		FixBool = intReturn
+	End Function
+	
+	
+	Public Function FixDtm(ByVal strText)
+		'
+		'	Fix a date string to the correct layout.
+		'	E.g. 2012-12-12 08:34:45
+		'
+		Dim	strBuffer
+	
+		If IsNull(strText) Or Len(strText) = 0 Then
+			strBuffer = "Null"
+		Else
+			strBuffer = "'" & ProperDateTime(strText) & "'" 
+		End If
+		FixDtm = strBuffer
+	End Function ' FixDtm
+
+
+	Private Function ProperDateTime(ByVal dDateTime)
+		'
+		'	Convert a system formatted date time to a proper format
+		'	Returns the current date time in proper format when no date time
+		'	is specified.
+		'
+		'	15-5-2009 4:51:57  ==>  2009-05-15 04:51:57
+		'
+		If Len(dDateTime) = 0 Then
+			dDateTime = Now()
+		End If
+	
+		ProperDateTime = NumberAlign(Year(dDateTime), 4) & "-" & _
+			NumberAlign(Month(dDateTime), 2) & "-" & _
+			NumberAlign(Day(dDateTime), 2) & " " & _
+			NumberAlign(Hour(dDateTime), 2) & ":" & _
+			NumberAlign(Minute(dDateTime), 2) & ":" & _
+			NumberAlign(Second(dDateTime), 2)
+	End Function ' ProperDateTime
+
+	
+	Private Function NumberAlign(ByVal intNumber, ByVal intLen)
+		'	
+		'	Returns a number aligned with zeros to a defined length
+		'
+		'	NumberAlign(1234, 6) returns '001234'
+		'
+		NumberAlign = Right(String(intLen, "0") & intNumber, intLen)
+	End Function '  NumberAlign
+	
+	
+	Public Sub GetRecordSet(ByRef objRs, ByVal strQuery)
+		''	Usage:
+		''	
+		''	Dim	strQuery
+		''	Dim	objRs
+		'' 
+		'' 	strQuery = "SELECT " & FLD_TMP_SID_ID & " "
+		''	strQuery = strQuery & "FROM " & TBL_TMP & " "
+		''	strQuery = strQuery & "WHERE " & FLD_TMP_DOMAIN_ID & "=" & intDomainId & ";"
+		''
+		''	Call objMySql.GetRecordSet(objRs, strQuery)
+		''	If objRs.Eof = True Then
+		''		WScript.Echo "NO RECORDS FOUND " & strQuery
+		''	Else
+		''		WScript.Echo "RECORDS FOUND " & strQuery
+		''		objRs.MoveFirst
+		''		While Not objRs.EOF
+		''			WScript.Echo objRs(FLD_TMP_SID_ID).Value
+		''			objRs.MoveNext                                        'next foudn object 
+		''	Wend
+		''	Set objRs = Nothing
+		''
+		On Error Resume Next
+		Set objRs = objDb.Execute(strQuery)
+		If Err.Number <> 0 Then
+			WScript.Echo "GetRecordSet: ERROR (0x" & Hex(Err.Number) & ") " & Err.Description
+			WScript.Echo vbTab & strQuery
+			Exit Sub
+		End If
+	End Sub
+	
+	
+	Public Function GetNextId(ByVal sTable, ByVal sField)
+		'
+		'	Return the maximum id of a field 
+		'
+		'	Example table values:
+		'
+		'		sng_song_id
+		'		-----------
+		'		         32
+		'                33
+		'                34
+		'
+		'	Command:
+		'		SqlGetMaxId("song_sng", "sng_song_id")
+		'
+		'	Returns:
+		'				35
+		'
+		'	Variables:
+		'		sTable		Table to check
+		'		sField		Id field to check of maximum number
+		Dim	sQuery
+		Dim	oRs
+		Dim	nReturn
+	
+		sQuery = "SELECT MAX(" & sField & ") AS MaxId FROM " & sTable & ";"
+		'	WScript.Echo sQuery
+		Set oRs = objDb.Execute(sQuery)
+		nReturn = oRs("MaxId")
+		If IsNull(nReturn) = True Then
+			' WScript.Echo "NO VALUE"
+			nReturn = 1
+		Else	
+			' WScript.Echo "VALUE " & nReturn & " FOUND"
+			nReturn = nReturn + 1
+		End If
+		GetNextId = nReturn
+	End Function ' GetNextId
+	
+	
+	Public Function ExecQuery(ByVal strQuery)
+		'
+		'	Executes a SQL query.
+		'	When errors occur, display the query and error message.
+		'
+		'	Returns values:
+		'		0 when succesfull.
+		'		other number as error code when unsuccesfull.
+		'
+		Dim	intReturn
+	
+		intReturn = 0
+	
+		On Error Resume Next
+		objDb.Execute(strQuery)
+		If Err.Number <> 0 Then
+			WScript.Echo
+			WScript.Echo "---[ SqlExec() ]----------------------"
+			WScript.Echo "** ERROR:       0x" & Hex(Err.Number)
+			WScript.Echo "** Description: " & Err.Description
+			WScript.Echo "** Query:"
+			WScript.Echo 
+			WScript.Echo strQuery
+			WScript.Echo 
+			WScript.Echo "--------------------------------------"
+			intReturn = Err.Number
+		Else
+			intReturn = 0
+		End If
+		ExecQuery = nReturn
+	End Function ' Exec
+	
+	
+	Public Function UniqueRecordId()
+		'
+		'	Returns a date-time code based on the previous value sDateTimeCode
+		'
+		'	sDatePrev = "20060522-125432-0002"
+		'	sDatePrev = GetDateTimeCode(sDatePrev)	'' returns "20060522-125432-0003"
+		'
+		'	Init:
+		'		Dim	gstrUniqueRecId		
+		'		gstrUniqueRecId = UniqueRecordId()
+		'
+		'	Usage:
+		'		Dim	x
+		' 		For x = 1 To 10000
+		'			WScript.Echo NumberAlign(x, 5) & ": " & UniqueRecordId()
+		' 		Next
+		'
+	
+		Dim	sDate
+		Dim	sCodeCur
+		Dim	sCodeNew
+		Dim	sDateNew
+		Dim	sDateCur
+		Dim	nCodeCur
+		Dim	intDate
+		Dim intTime
+		Dim	dNow
+		Dim	strReturn
+	
+		' Get the new date time in a string
+		dNow = Now()
+	
+		' Format it to YYYYMMDD-HHMMSS
+		sDateNew = Year(dNow) & _
+			NumberAlign(Month(dNow), 2) & _
+			NumberAlign(Day(dNow), 2) & _
+			"-" & _
+			NumberAlign(Hour(dNow), 2) & _
+			NumberAlign(Minute(dNow), 2) & _
+			NumberAlign(Second(dNow), 2)
+
+		' Extract the DateTime and Code 
+		sCodeCur = Right(strUniqueRecId, 4)		' Code
+		sDateCur = Left(strUniqueRecId, 15)		' DateTime 
+
+		If sDateCur = sDateNew Then
+			nCodeCur = Int(sCodeCur)
+			nCodeCur = nCodeCur + 1
+		Else
+			nCodeCur = 0
+		End If
+	
+		' Build the new UniqueRecordId
+		strUniqueRecId = sDateNew & "-" & NumberAlign(nCodeCur, 4)
+		' Return the code
+	
+		intDate = Year(dNow) & NumberAlign(Month(dNow), 2) & NumberAlign(Day(dNow), 2)
+		intTime = NumberAlign(Hour(dNow), 2) & NumberAlign(Minute(dNow), 2) & NumberAlign(Second(dNow), 2)
+	
+		'WScript.Echo intDate
+		'WScript.Echo intTime
+		'Wscript.Echo nCodeCur
+	
+		'strReturn = "U-" & UCase(NumberAlign(Hex(intDate), 7) & "-" & NumberAlign(Hex(intTime), 5) & "-" & NumberAlign(Hex(nCodeCur), 4))
+		strReturn = UCase(NumberAlign(Hex(intDate), 7) & NumberAlign(Hex(intTime), 5) & NumberAlign(Hex(nCodeCur), 4))
+		'WScript.Echo strReturn
+		UniqueRecordId = strReturn
+	End Function ' UniqueRecordId
+
+	
+	Public Function GetRecCount(ByVal strTable)
+		'
+		'	Return the number of records in a table.
+		'
+		Dim	strQuery
+		Dim	objRs
+		Dim	intReturn
+	
+		intReturn = 0
+	
+		strQuery = "SELECT COUNT(*) AS rec_count "
+		strQuery = strQuery & "FROM "
+		strQuery = strQuery & strTable
+		strQuery = strQuery & ";"
+		
+		Set objRs = objDb.Execute(strQuery)
+		
+		If objRs.Eof = False Then
+			objRs.MoveFirst
+			intReturn = objRs("rec_count")
+		End If
+		GetRecCount = intReturn
+	End Function ' GetRecCount
+
+	
+	Public Sub ClearTable(ByVal strTable)
+		'
+		'	Delete all rows from a table strTable.
+		'
+		Dim	strQuery
+		
+		strQuery = "TRUNCATE TABLE " & strTable
+		Call ExecQuery(strQuery)
+	End Sub
+	
+	
+	Public Sub DelRecord(ByVal strTable, ByVal strField, ByVal strValue)
+		Dim	strQuery
+		
+		strQuery = "DELETE FROM " & strTable & " " & _
+			"WHERE " & strField & "="
+		
+		If IsNumeric(strValue) = False Then
+			strQuery = strQuery & FixStr(strValue)
+		Else
+			strQuery = strQuery & strValue
+		End If
+		
+		strQuery = strQuery & ";"
+		
+		Call ExecQuery(strQuery)
+	End Sub
+End Class ' of Class ClassMySQL
+
+
+
+Call ScriptInit()
+'Call ScriptTest()
+Call ScriptRun()
+Call ScriptDone()
+WScript.Quit()
 
 
 
