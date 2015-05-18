@@ -1,0 +1,1153 @@
+'
+'	CreateBeheerAccount
+'
+'
+'	Version	Description
+'	=======	================================================================================
+'	12		Use a database as source instead with an Excel sheet
+'	11		New version; works from REC domain
+'	10		Place the function of a beheerder in title field/Place ARGUS=xxxxx in description
+'	09		UUpdate to use Class Splunk_06
+'	08		Updates to use class Splunk_04
+'	07		Added Splunk logging
+'	06		?
+'	05		New version that build command files (.CMD) with DSADD commands in it.
+'	04		?
+'	03		Make use full for multiple domains
+'	02		Add Argus field for export to log file
+'	01		Initial build of script.
+'
+''	CLASSES, FUNCTIONS AND SUBS:
+''		Class ClassTextFile
+''		Function AdGetRootDse
+''		Function ConfigReadSettingSection
+''		Function DsutilsGetDnFromSam
+''		Function FixFirstname
+''		Function FixLastName
+''		Function FixMiddleName
+''		Function GenerateAccountName
+''		Function GeneratePassword
+''		Function GetScriptNameMinVersion
+''		Function GetScriptPath
+''		Function GetTempFileName
+''		Function RunCommand
+''		Sub	ScriptInit
+''		Sub CreateNewAccount
+''		Sub DeleteFile
+''		Sub DsmodGroupAddMember
+''		Sub MakeSameAs
+''		Sub ScriptDone
+''		Sub ScriptRun
+
+
+Option Explicit
+
+
+
+Const	MAX_ACCOUNT_LEN		=	20
+
+Const	ADS_NAME_INITYPE_GC =	3
+Const	ADS_NAME_TYPE_NT4	=	3
+Const	ADS_NAME_TYPE_1779	=	1
+
+Const	FOR_READING			=	1
+Const	FOR_WRITING			=	2
+Const	FOR_APPENDING		=	8
+
+
+
+Dim		gobjRootDse
+Dim		gstrRootDse
+Dim		gstrPathExcel
+Dim		gobjExcel
+Dim		gobjSheet
+Dim		gobjFso
+Dim		gobjFile
+Dim		gstrDomainDns
+Dim		gobjSplunkLog
+Dim		gobjShell
+Dim		tfNewAccount		'	Text File New Account; write all actions in this file.
+
+
+
+Call ScriptInit()
+'Call ScriptTest()
+Call ScriptRun()
+Call ScriptDone()
+WScript.Quit()
+
+
+
+Sub	ScriptInit()
+	Dim	strRootLog
+	
+	' Get the current RootDSE location.
+	gstrRootDse = AdGetRootDse
+	
+	
+	'gstrRootDse = "DC=acceptatie,DC=ns,DC=nl"
+	WScript.Echo "gstrRootDse=" & gstrRootDse
+	
+	' 2015-02-19 PVDH: Use file 000019-input.xls
+	gstrPathExcel = GetScriptPath & "000019-input.xlsx"
+	'gstrPathExcel = GetScriptPath & "input.xlsx"
+	
+	WScript.Echo "Using Excel file: " & gstrPathExcel
+	
+	Set gobjExcel = CreateObject("Excel.Application")
+	Set gobjSheet = gobjExcel.Workbooks.Open(gstrPathExcel)
+	
+	Set gobjFso = CreateObject("Scripting.FileSystemObject")
+	
+	Set gobjShell = CreateObject("WScript.Shell")
+	
+	strRootLog = "\\nsd0dt00140.prod.ns.nl\logs$"
+	
+	'' Connect to the class object SplunkLog
+	'Set gobjSplunkLog = New SplunkLog_06
+	
+	'' Setup class with the correct information
+	'gobjSplunkLog.SetLogPath(gobjSplunkLog.GetServerShare() & "\[SCRIPTNAME]\[DOMAINNETBIOS]\[COMPUTERNAME]\[YYYY-MM-DD]\[HH-MM-SS].log")
+	' gobjSplunkLog.OpenFile()
+End Sub
+
+
+Sub ScriptRun()
+	Const	COL_FIRST	=	1
+	Const	COL_MIDDLE	=	2
+	Const	COL_LAST	=	3 
+	Const	COl_COMP	=	4
+	Const	COL_TITLE	=	5
+	Const	COL_MOBILE	=	6
+	Const	COL_SAME	=	7
+	Const	COL_DOMAIN	=	8
+	Const	COL_ARGUS	=	9
+	Const	COL_REQUEST_BY = 11
+
+	Dim		intRow
+	Dim		strAccountName
+	Dim		strFirstName
+	Dim		strMiddleName
+	Dim		strLastName
+	Dim		strCompany
+	Dim		strDescription
+	Dim		strSameAs
+	Dim		strTitle			''	 Funtietitel van de beheerder. 
+	Dim		strArgusCall
+	Dim		strRootDseXls
+	Dim		strCurrentDomain
+	Dim		strCommandLine
+	Dim		strMobile
+	Dim		strDomainDns
+	Dim		strOuBeheer
+	Dim 	blnUseCompanyOu
+	Dim		objFileAccount
+	Dim		strPassword
+	Dim		strPreWin2000
+	Dim		strRequestedBy
+	
+	WScript.Echo 
+	
+	On Error Resume Next
+	gobjFso.DeleteFile GetScriptPath & "RUNON*.CMD", True
+	
+	intRow = 10		' First row of the information in Excel
+	
+	' Loop until a empty line is found.
+	Do Until gobjExcel.Cells(intRow, 1).Value = ""
+		strFirstName = Trim(gobjExcel.Cells(intRow, COL_FIRST).Value)
+		strMiddleName = Trim(gobjExcel.Cells(intRow, COL_MIDDLE).Value)
+		strLastName = Trim(gobjExcel.Cells(intRow, COL_LAST).Value)
+		strCompany = Trim(gobjExcel.Cells(intRow, COl_COMP).Value)
+		strTitle = Trim(gobjExcel.Cells(intRow, COL_TITLE).Value)
+		strSameAs = Trim(gobjExcel.Cells(intRow, COL_SAME).Value)
+		strRootDseXls = Trim(gobjExcel.Cells(intRow, COL_DOMAIN).Value)
+		strArgusCall = Trim(gobjExcel.Cells(intRow, COL_ARGUS).Value)
+		strMobile = Trim(gobjExcel.Cells(intRow, COL_MOBILE).Value)
+		strRequestedBy = Trim(gobjExcel.Cells(intRow, COL_REQUEST_BY).Value)
+		'strAccountName = GenerateAccountName(strCompany, strFirstName, strMiddleName, strLastName)
+		
+		'strDomainDns = ConfigReadSettingSection(strRootDseXls, "Upn")
+		'strOuBeheer = ConfigReadSettingSection(strRootDseXls, "BeheerOu")
+		'blnUseCompanyOu = CBool(ConfigReadSettingSection(strRootDseXls, "UseCompanyOu"))
+		'strPreWin2000 = ConfigReadSettingSection(strRootDseXls, "PreWin2000")
+		
+		'strDescription = "CALL=" & strArgusCall
+		
+		'WScript.Echo strAccountName & vbTab & strDomainDns
+		
+		'Set gobjFile = gobjFso.OpenTextFile("RUNON_" & strDomainDns & ".cmd", FOR_APPENDING, True)
+		
+		' Set objFileAccount = gobjFso.OpenTextFile(strArgusCall & " " & strPreWin2000 & " " & strAccountName & ".txt", FOR_WRITING, True)
+		
+		' dsadd user "CN=KPN_Joop.deCock,OU=KPN,OU=Beheer,DC=test,DC=ns,DC=nl" 
+		'	-samid KPN_Joop.deCock 
+		'	-pwd "JINX@whos28" 
+		'	-fn "Joop de"
+		'	-ln "Cock" 
+		'	-desc "CALL=546464"
+		'	-title "Technisch Beheerder"
+		'	-display "KPN_Joop.deCock" 
+		'	-upn "KPN_Joop.deCock@test.ns.nl" 
+		'	-mustchpwd yes
+		
+		Call CreateNewAccount(strFirstName, strMiddleName, strLastName, strCompany, strTitle, strMobile, strSameAs, strRootDseXls, strArgusCall, strRequestedBy)
+		
+		
+		'gobjFile.WriteLine
+		'gobjFile.WriteLine "echo Creating " & strAccountName
+		'strCommandLine = "dsadd.exe user "
+		'strCommandLine = strCommandLine & Chr(34) & "CN=" & strAccountName & ","
+		'If blnUseCompanyOu = True Then
+		'	strCommandLine = strCommandLine & "OU=" & strCompany & "," 
+		'End If
+		'strCommandLine = strCommandLine & strOuBeheer & "," & strRootDseXls & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-samid " & Chr(34) & strAccountName & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-pwd " & Chr(34) & strPassword & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-fn " & Chr(34) & Trim(strFirstName & " " & strMiddleName) & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-ln " & Chr(34) & strLastName & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-title " & Chr(34) & strTitle & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-desc " & Chr(34) & strDescription & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-display " & Chr(34) & strAccountName & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-upn " & Chr(34) & strAccountName & "@" & strDomainDns & Chr(34) & " "
+		'strCommandLine = strCommandLine & "-mustchpwd yes"
+		'WScript.Echo strCommandLine
+		'gobjFile.WriteLine strCommandLine
+		
+		'objFileAccount.WriteLine "Het nieuwe beheeraccount is aangemaakt"
+		'objFileAccount.WriteLine
+		'objFileAccount.WriteLine "Account:          " & strPreWin2000 & "\" & strAccountName
+		'objFileAccount.WriteLine "Initial password: " & strPassword
+		'objFileAccount.WriteLine
+		
+		'gobjSplunkLog.AddKey "domain_netbios", strPreWin2000, vbString
+		' gobjSplunkLog.AddKey "executed_by", gobjSplunkLog.GetCurrentUserName(), vbString
+		'gobjSplunkLog.AddKey "user_name", strAccountName, vbString
+		'gobjSplunkLog.AddKey "full_name", Trim(strFirstName & " " & strMiddleName) & " " & strLastName, vbString
+		
+		
+		'If Len(strSameAs) > 0 Then
+		'	objFileAccount.WriteLine "De domain groupen voor het account zijn gelijk gemaakt aan account " & strSameAs
+		'	strCommandLine = "cscript.exe //nologo AdMakeUserGroupsSameAs.vbs " & Chr(34) & strSameAs & Chr(34) & " " & Chr(34) & strAccountName & chr(34)
+		'	WScript.Echo strCommandLine
+		'	gobjFile.WriteLine strCommandLine
+			
+			'gobjSplunkLog.AddKey "same_as", strSameAs, vbString
+		'End If
+		'gobjSplunkLog.WriteLog
+		
+		'objFileAccount.Close
+		'Set objFileAccount = Nothing
+		
+		'gobjFile.Close
+		'Set gobjFile = Nothing
+		intRow = intRow + 1
+	Loop
+End Sub ' ScriptRun
+
+
+Sub ScriptDone()
+	'' close the class SplunkLog
+	'Set gobjSplunkLog = Nothing
+
+	Set gobjShell = Nothing
+	
+	Set gobjFso = Nothing
+
+	Set gobjSheet = Nothing
+	
+	gobjExcel.Quit
+	
+	
+	Set gobjExcel = Nothing
+End Sub
+
+
+
+Sub ScriptTest()
+	Dim		s
+	Dim		r
+	
+	WScript.Echo
+	WScript.Echo "TESTING!!"
+	
+	r = "DC=prod,DC=ns,DC=nl"
+	s = "Perry.vandenHondel"
+	WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
+	
+	s = "Rudolf.TheRedNosedReendeer"
+	WScript.Echo "DN for " & s & " = " &DsutilsGetDnFromSam(r, "user", s)
+	
+	s = "BEH_Perry.vdHondel"
+	WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
+End Sub ' ScriptTest
+
+
+
+Function RunCommand(sCommandLine)
+	''
+	'//	RunCommand(sCommandLine)
+	'//
+	'//	Run a DOS command and wait until execution is finished before the cript can commence further.
+	'//
+	'//	Input
+	'//		sCommandLine	Contains the complete command line to execute 
+	'//
+	Dim oShell
+	Dim sCommand
+	Dim	nReturn
+
+	Set oShell = WScript.CreateObject("WScript.Shell")
+	sCommand = "CMD /c " & sCommandLine
+	' 0 = Console hidden, 1 = Console visible, 6 = In tool bar only
+	'LogWrite "RunCommand(): " & sCommandLine
+	nReturn = oShell.Run(sCommand, 6, True)
+	Set oShell = Nothing
+	RunCommand = nReturn 
+End Function '' RunCommand
+
+
+
+Sub CreateNewAccount(ByVal strFirstName, ByVal strMiddleName, ByVal strLastName, ByVal strCompany, ByVal strTitle, ByVal strMobile, ByVal strSameAs, ByVal strRootDseXls, ByVal strArgusCall, ByVal strRequestedBy)
+	'
+	'	Create a new account
+	'
+	Dim		strPassword
+	Dim		strAccountName
+	Dim		strUpn
+	Dim		strUpnFileName
+	Dim		strDomainDns
+	Dim		strSameAsDn
+	Dim		strAccountDn
+	Dim		blnUseCompanyOu
+	Dim		strOuBeheer
+	Dim		strDescription
+	Dim		c
+	Dim		d
+	
+	
+	WScript.Echo 
+	WScript.Echo Left("CreateNewAccount()" & String(80, "-"), 80)
+	
+	strAccountName = GenerateAccountName(strCompany, strFirstName, strMiddleName, strLastName)
+	'	Create a lower case account name
+	strAccountName = LCase(strAccountName)
+	strDomainDns = ConfigReadSettingSection(strRootDseXls, "Upn")
+	strUpn = strAccountName & "@" & strDomainDns
+	strUpnFileName = strArgusCall & "_" & Replace(strUpn, "@", "-at-") & ".txt" 
+	
+	Set tfNewAccount = New ClassTextFile
+	tfNewAccount.SetMode(FOR_WRITING)
+	tfNewAccount.SetPath(strUpnFileName)
+	tfNewAccount.OpenFile()
+
+	WScript.Echo "Write to text file: " & strUpnFileName
+	
+	If Len(DsutilsGetDnFromSam(strRootDseXls, "user", strAccountName)) > 0 Then
+		'	Generated account exists in the target AD domain. Skip this entry
+		WScript.Echo "WARNING: Account " & strAccountName & " already exists in " & strRootDseXls
+		tfNewAccount.WriteLineToFile("WARNING: Account " & strAccountName & " already exists in AD domain " & strRootDseXls)
+		Exit Sub
+	End If
+	
+	strPassword = GeneratePassword() 
+	
+	tfNewAccount.WriteLineToFile("CALL")
+	tfNewAccount.WriteLineToFile(vbTab & "Call reference:     " & strArgusCall)
+	tfNewAccount.WriteLineToFile("")
+	tfNewAccount.WriteLineToFile("ACCOUNT")
+	tfNewAccount.WriteLineToFile(vbTab & "Account:            " & strUpn)
+	tfNewAccount.WriteLineToFile(vbTab & "Initial password:   " & strPassword)
+	tfNewAccount.WriteLineToFile("")
+	
+	If Len(strSameAs) > 0 Then
+		tfNewAccount.WriteLineToFile("REFERENCE ACCOUNT")
+		tfNewAccount.WriteLineToFile(vbTab & "Clone groups from: " & strSameAs)
+		
+		strSameAsDn = DsutilsGetDnFromSam(strRootDseXls, "user", strSameAs)
+		If Len(strSameAsDn) = 0 Then
+			tfNewAccount.WriteLineToFile(vbTab & "WARNING: Could not find the reference account of " & strSameAs & " to perform a group clone action")
+		End If
+	End If
+	
+	'	Build the DN for the new account to create
+	blnUseCompanyOu = CBool(ConfigReadSettingSection(strRootDseXls, "UseCompanyOu"))
+	strOuBeheer = ConfigReadSettingSection(strRootDseXls, "BeheerOu")
+	strAccountDn = "CN=" & strAccountName & ","
+	If blnUseCompanyOu = True Then
+		strAccountDn = strAccountDn & "OU=" & strCompany & "," 
+	End If
+	
+	strAccountDn = strAccountDn & strOuBeheer & "," & strRootDseXls
+	strDescription = "CALL=" & strArgusCall & " REQUEST_BY=" & strRequestedBy
+	
+	If Left(strMobile, 1) <> "+" Then
+		tfNewAccount.WriteLineToFile(vbTab & "WARNING: No valid mobile number is specified for this new administrative account using SmartXS, please supply a valid valid mobile number")
+		strMobile = "+31600000000"
+	End If
+	
+	WScript.Echo vbTab & "First name                   : " & strFirstName
+	WScript.Echo vbTab & "Middle name                  : " & strMiddleName
+	WScript.Echo vbTab & "Last name                    : " & strLastName
+	WScript.Echo vbTab & "Company                      : " & strCompany
+	WScript.Echo vbTab & "Title                        : " & strTitle
+	WScript.Echo vbTab & "Mobile                       : " & strMobile
+	WScript.Echo vbTab & "Reference account            : " & strSameAs
+	WScript.Echo vbTab & "Root DSE                     : " & strRootDseXls
+	WScript.Echo vbTab & "Reference call id            : " & strArgusCall
+	WScript.Echo vbTab & "----"
+	WScript.Echo vbTab & "Account name                 : " & strAccountName
+	WScript.Echo vbTab & "UPN                          : " & strUpn
+	WScript.Echo vbTab & "Initial password             : " & strPassword
+	WScript.Echo vbTab & "New account DN               : " & strAccountDn
+	WScript.Echo vbTab & "Reference account DN         : " & strSameAsDn
+	WScript.Echo vbTab & "Description                  : " & strDescription
+	
+	'	Build the command line to create a new account using DSADD.EXE
+	c = "dsadd user " & Chr(34) & strAccountDn & Chr(34) & " "
+	c = c & "-samid " & Chr(34) & strAccountName & Chr(34) & " "
+	c = c & "-pwd " & Chr(34) & strPassword & Chr(34) & " "
+	c = c & "-fn " & Chr(34) & Trim(strFirstName & " " & strMiddleName) & Chr(34) & " "
+	c = c & "-ln " & Chr(34) & strLastName & Chr(34) & " "
+	c = c & "-title " & Chr(34) & strTitle & Chr(34) & " "
+	c = c & "-desc " & Chr(34) & strDescription & Chr(34) & " "
+	c = c & "-display " & Chr(34) & strAccountName & Chr(34) & " "
+	c = c & "-upn " & Chr(34) & strUpn & Chr(34) & " "
+	c = c & "-mobile " & Chr(34) & strMobile & Chr(34) & " "
+	c = c & "-company " & Chr(34) & strCompany & Chr(34) & " "
+	c = c & "-mustchpwd yes"
+	
+	WScript.Echo vbTab & c
+	gobjShell.Run "cmd /c " & c, 0, True
+	
+	WScript.Echo vbTab & "ADD TO DEFAULT GROUPS FOR SmartXS (Works only under PROD.NS.NL)"
+	
+	'' Add default group ROL_SmartXS_Autorisatie
+	d = DsutilsGetDnFromSam(strRootDseXls, "group", "RP_SmartXS_Autorisatie") ' Was ROL_SmartXS_Autorisatie
+	Call DsmodGroupAddMember(d, strAccountDn)
+
+	'' Add default group for BONS Autorisatie
+	d = DsutilsGetDnFromSam(strRootDseXls, "group", "RP_BONS_Autorisatie") ' 2014-12-29 PVDH Kan de groep niet vinden in PROD.NS.NL
+	Call DsmodGroupAddMember(d, strAccountDn)
+
+	'' Add to default beheer group, 2015-02-18 PVDH
+	WScript.Echo vbTab & "ADD ACCOUNT TO DEFAULT ACCOUNT TYPE GROUP (AT-*)"
+	d = DsutilsGetDnFromSam(strRootDseXls, "group", "AT-PERSOON-BEHEER-" & strCompany)
+	Call DsmodGroupAddMember(d, strAccountDn)
+
+	WScript.Echo vbTab & "SETTING THE ACCOUNT UAC FLAG NOT_DELEGATED (Wait 10 seconds...)"
+	WScript.Sleep 10000
+	'adfind.exe -b "DC=prod,DC=ns,DC=nl" -f "sAMAccountName=BEH_WMIScanProject" userAccountControl -adcsv | admod userAccountControl::{{.:SET:1048576}}	
+	c = "adfind.exe -b " & Chr(34) & strRootDseXls & Chr(34) & " -f " & Chr(34) & "sAMAccountName=" & strAccountName & Chr(34) & " userAccountControl -adcsv | admod.exe userAccountControl::{{.:SET:1048576}}"
+	'WScript.Echo c
+	Call RunCommand(c)
+	
+	'	Clone the groups of the reference accounts
+	If Len(strSameAsDn) > 0 Then
+		WScript.Echo vbTab & "ADD TO REFERENCE ACCOUNT GROUPS"	
+		WScript.Echo vbTab & "INFO: Reference account specified, clone groups from " & strSameAsDn
+		Call MakeSameAs(strSameAsDn, strAccountDn)
+	Else
+		WScript.Echo vbTab & "INFO: No reference account specified, no group cloning done."
+	End If
+	
+	tfNewAccount.CloseFile()
+	Set tfNewAccount = Nothing
+End Sub ' CreateNewAccount
+
+
+
+Sub MakeSameAs(ByVal s, ByVal d)
+	'
+	'	Copy all groups from s to d
+	'	
+	'	s		Source DN
+	'	d		Destionation DN
+	'
+		
+	Dim		c
+	Dim		strPathTemp
+	Dim		f
+	Dim		ts
+	Dim		l
+	Dim		i
+	
+	WScript.Echo "MakeSameAs()"
+
+	'	Get a temp file name to store the group DN's
+	strPathTemp = GetTempFileName()
+	
+	i = 0
+	
+	c = "dsget.exe user " & Chr(34) & s & Chr(34) & " -memberof >" & strPathTemp
+	WScript.Echo vbTab & c
+	gobjShell.Run "cmd /c " & c, 0, True
+	
+	On Error Resume Next
+	Set f = gobjFso.GetFile(strPathTemp)
+	If Err.Number = 0 Then
+		Set ts = f.OpenAsTextStream(FOR_READING)
+		Do While ts.AtEndOfStream <> True
+			l = ts.ReadLine
+			If InStr(l, "CN=") > 0 Then
+				c = "dsmod.exe group " & l & " -addmbr " & d
+				WScript.Echo c
+				i = i + 1
+				gobjShell.Run "cmd /c " & c, 0, True
+			End If
+		Loop
+		f.Close
+		f.Delete
+		Set f = Nothing
+		
+		tfNewAccount.WriteLineToFile(vbTab & "Account added to " & i & " groups")
+		
+	Else
+		WScript.Echo "WARNING: Could not open " & strPathTemp & " (" & Err.Number & ")"
+	End If 
+End Sub ' MakeSameAs
+
+
+
+Function GetTempFileName
+	'//////////////////////////////////////////////////////////////////////////////
+	'//
+	'//	GetTempFileName
+	'//
+	'//	Input:
+	'//		None
+	'//
+	'//	Output:
+	'//		A string with a temporary file name, e.g. E:\temp\filename.tmp
+	'//
+	Dim	oTempFolder
+	Dim	sTempFile
+	Dim	oFso
+
+	Const	WINDOWS_FOLDER		=	0
+	Const	SYSTEM_FOLDER		=	1
+	Const	TEMPORARY_FOLDER	=	2
+
+	Set oFso = CreateObject("Scripting.FileSystemObject")
+	Set oTempFolder = oFSO.GetSpecialFolder(TEMPORARY_FOLDER)
+	sTempFile = oFSO.GetTempName
+
+	GetTempFileName = oTempFolder & "\" & sTempFile
+
+	Set oTempFolder = Nothing
+	Set oFso = Nothing
+End Function '' GetTempFileName
+
+
+
+Sub DsmodGroupAddMember(ByVal g, ByVal m)
+	'
+	'	dsmod group "CN=US INFO,OU=Distribution Lists,DC=microsoft,DC=com" -addmbr "CN=John Smith,CN=Users,DC=microsoft,DC=com"
+	'
+	Dim		c
+	
+	c = "dsmod.exe group " & Chr(34) & g & Chr(34) & " -addmbr " & Chr(34) & m & Chr(34)
+	'WScript.Echo "DsmodGroupAddMember(): " & c
+	gobjShell.Run "cmd /c " & c, 0, True
+End Sub ' DsmodGroupAddMember
+
+
+
+Sub DeleteFile(sPath)
+	''
+	''	DeleteFile()
+	''	
+	''	Delete a file specified as "d:\folder\filename.ext"
+	''
+	''	sPath	The name of the file to delete.
+	''
+   	Dim oFSO
+   	
+   	Set oFSO = CreateObject("Scripting.FileSystemObject")
+   	If oFSO.FileExists(sPath) Then
+   		oFSO.DeleteFile sPath, True
+   	End If
+   	Set oFSO = Nothing
+End Sub '' DeleteFile
+
+
+
+Function GenerateAccountName(ByVal strCompany, ByVal strFirstName, ByVal strMiddleName, ByVal strLastName)
+	'
+	'	Generate a new SAMAccountName for a user.
+	'
+	'		strFirstName			Richard
+	'		strMiddleName			van
+	'		strLastName				Beukenstein
+	'		strCompany				HP
+	'
+	Dim	strAccountName
+	Dim	intLen
+	
+	'WScript.Echo 
+	'WScript.Echo "GenerateAccountName: " & strCompany & vbTab & "FN:" & strFirstName & vbTab & "MN:" & strMiddleName & vbTab & "LN:" & strLastName
+
+	strFirstName = FixFirstName(strFirstName)
+	
+	' Remove all middle names such as: van den, van, de, 't , van 't
+	strMiddleName = FixMiddleName(strMiddleName)
+	
+	strLastName = FixLastName(strLastName)
+	
+	' Build the Account name.
+	' V06: Select between company if blank!
+	If Len(strCompany) = 0 Then
+		strAccountName = strFirstName & "." & strMiddleName & strLastName
+	Else
+		strAccountName = strCompany & "_" & strFirstName & "." & strMiddleName & strLastName
+	End If
+		
+	'WScript.Echo "GenerateAccountName(): " & strAccountName
+	
+	'WScript.Echo strAccountName
+	' Get the length of the generated account name.
+	intLen = Len(strAccountName)
+	'WScript.Echo "Len(" & strAccountName & ")=" & intLen
+	If intLen > MAX_ACCOUNT_LEN Then
+		' The generated username is to long, shorten it by using only
+		' the initial of the user's first name.
+		
+		strAccountName = strCompany & "_" & Left(strFirstName, 1) & "." & strMiddleName & strLastName
+		
+	End If
+	' Only take the MAX_ACCOUNT_LEN of chars of the newly generated account.
+	
+	' Strip all spaces from the account name.
+	strAccountName = Replace(strAccountName, " ", "")
+	
+	' Return the generated account name, but only the first 20 chars.
+	GenerateAccountName = Left(strAccountName, MAX_ACCOUNT_LEN)
+End Function ' GenerateAccountName
+
+
+
+Function FixMiddleName(strMiddleName)
+	Dim	arrPrefix
+	Dim	strPrefix
+	Dim	x
+	
+	'WScript.Echo "FixMiddleName(" & strMiddleName & ")"
+	
+	' Convert the string in lower case.
+	strMiddleName = LCase(strMiddleName)
+	
+	' Remove all quote's (') in the middle name.
+	strMiddleName = Replace(strMiddleName, "'", "")
+	
+	' Vul de string met velden van de array.
+	strPrefix = "van den|vd"
+	strPrefix = strPrefix & "|van der|vd"
+	strPrefix = strPrefix & "|van den|vd"
+	strPrefix = strPrefix & "|van de|vd"
+	strPrefix = strPrefix & "|van t|vt"
+	strPrefix = strPrefix & "|ten|t"
+	strPrefix = strPrefix & "|van|v"
+	strPrefix = strPrefix & "|den|d" 
+	strPrefix = strPrefix & "|de|d" 	
+	strPrefix = strPrefix & "|in t|it"
+	strPrefix = strPrefix & "|t|t"
+	strPrefix = strPrefix & "|la|l"
+	strPrefix = strPrefix & "|le|l"
+	
+	' Convert the Prefix string to an array.
+	arrPrefix = Split(strPrefix, "|")
+	
+	For x = 0 To UBound(arrPrefix) Step 2
+		'WScript.Echo x & vbTab & arrPrefix(x) & vbTab & arrPrefix(x + 1)
+		If InStr(1, strMiddleName, arrPrefix(x), vbTextCompare) > 0 Then
+			strMiddleName = Replace(strMiddleName, arrPrefix(x), arrPrefix(x + 1))
+			Exit For
+		End If
+	Next
+
+	'WScript.Echo "FixMiddleName(): " & strMiddleName
+	FixMiddleName = strMiddleName
+End Function ' FixMiddleName
+
+
+
+Function FixLastName(strName)
+	' Remove all quote's (') in the last name.
+	strName = Replace(strName, " ", "")
+	
+	' Remove all '-' in the last name.
+	strName = Replace(strName, "-", "")
+	
+	FixLastname = strName
+End Function ' FixLastname()
+
+
+
+Function FixFirstname(strName)
+	' Remove all quote's (') in the last name.
+	strName = Replace(strName, " ", "")
+	
+	' Remove all '-' in the last name.
+	strName = Replace(strName, "-", "")
+	
+	FixFirstname = strName
+End Function ' FixLastname()
+
+
+
+Function GeneratePassword()
+	'
+	'	Generate a new password based on Scrabble 4-letter words.
+	'
+	'	Returns: JAME-axil-05 (example) (uppercase-lowercase-day)
+	'
+	Dim	strReturn
+	Dim	strWord
+	Dim	arrWord
+	Dim	x
+	Dim	intMax
+	Dim	intMin
+	Dim	strWord1
+	Dim	strWord2
+	
+	' Set the number randomizer
+	Randomize
+	
+	' Use four letter Scrabble words for password parts
+	strWord = "APEX;AXAL;AXED;AXEL;AXES;AXIL;AXIS;AXLE;AXON;CALX;COAX;COXA;CRUX;DEXY;DOUX;DOXY;EAUX;EXAM;EXEC;" & _
+		"EXES;EXIT;EXON;EXPO;FALX;FAUX;FIXT;FLAX;FLEX;FLUX;FOXY;HOAX;IBEX;ILEX;IXIA;JEUX;JINX;LUXE;LYNX;MAXI;MINX;" & _
+		"MIXT;MOXA;NEXT;NIXE;NIXY;OYNX;ORYX;OXEN;OXES;OXID;OXIM;PIXY;PREX;ROUX;SEXT;SEXY;TAXA;TAXI;TEXT;VEXT;WAXY;" & _
+		"XYST;AJAR;AJEE;DJIN;DOJO;FUJI;HADJ;HAJI;HAJJ;JABS;JACK;JADE;JAGG;JAGS;JAIL;JAKE;JAMB;JAMS;JANE;JAPE;JARL;" & _
+		"JARS;JATO;JAUK;JAUP;JAVA;JAWS;JAYS;JAZZ;JEAN;JEED;JEEP;JEER;JEES;JEEZ;JEFE;JEHU;JELL;JEON;JERK;JESS;JEST;" & _
+		"JETE;JETS;JEUX;JIAO;JIBB;JIBE;JIBS;JIFF;JIGS;JILL;JILT;JIMP;JINK;JINN;JINS;JINX;JISM;JIVE;JOBS;JOCK;" & _
+		"JOES;JOEY;JOGS;JOHN;JOIN;JOKE;JOKY;JOLE;JOLT;JOSH;JOSS;JOTA;JOTS;JOUK;JOWL;JOWS;JOYS;JUBA;JUBE;JUDO;JUGA;" & _
+		"JUGS;JUJU;JUKE;JUMP;JUNK;JUPE;JURA;JURY;JUST;JUTE;JUTS;MOJO;PUJA;RAJA;SOJA;RAIL;NAIL;"
+		
+	' Fill the array with the words.
+	arrWord = Split(strWord, ";")
+
+	' Set the low and high bounderies
+	intMin = 0
+	intMax = UBound(arrWord)
+	
+	' Retrieve a word from the array based on the randomized posisition for Word 1 and Word 2.
+	strWord1 = arrWord(Int((intMax - intMin + 1) * Rnd + intMin))
+	strWord2 = arrWord(Int((intMax - intMin + 1) * Rnd + intMin))
+	
+	' Return the generated password. Format XXXX@xxxx00
+	GeneratePassword = UCase(strWord1) & "-" & LCase(strWord2) & "-" & Right("0" & Day(Date), 2)
+End Function  ' GeneratePassword
+
+
+
+Function DsutilsGetDnFromSam(ByVal strRoot, ByVal strType, ByVal strSamAccount)
+	'
+	'	Get the DN from an sAMAccountName using DSQUERY.EXE
+	'
+	'	strRoot			"DC=test,DC=ns,DC=nl"
+	'	strType			user, group
+	'	strSamAccount	"Perry.vandenHondel"
+	'
+	'	Returns
+	'		DN				Found the DN path of the strSamAccount
+	'		Empty string	Not found
+	'
+	
+	Dim		r			'	Result
+	Dim		c			'	Command Line
+	Dim		f			'	File Object
+	Dim		ts			' 	TextStream
+	Dim		l			' 	Line
+	Dim		i
+	Dim		x
+	Dim		objShell
+	Dim		objExec
+	Dim		strPath
+	
+	Set objShell = CreateObject("WScript.Shell")
+
+	c = "dsquery.exe " & strType & " " & strRoot & " -samid " & strSamAccount 
+	'WScript.Echo c
+	Set objExec = objShell.Exec(c)
+	r = Replace(objExec.StdOut.ReadLine, """", "") ' And Remove " around the string
+	'WScript.Echo "r=[" & r & "]"
+	Set objShell = Nothing
+	
+	DsutilsGetDnFromSam = r
+End Function ' DsutilsGetDnFromSam
+
+
+
+Function GetScriptPath()
+	'==
+	'==	Returns the path where the script is located.
+	'==
+	'==	Output:
+	'==		A string with the path where the script is run from.
+	'==
+	'==		drive:\folder\folder\
+	'==
+	Dim sScriptPath
+	Dim sScriptName
+
+	sScriptPath = WScript.ScriptFullName
+	sScriptName = WScript.ScriptName
+
+	GetScriptPath = Left(sScriptPath, Len(sScriptPath) - Len(sScriptName))
+End Function '' GetScriptPath
+
+
+
+Function AdGetRootDse()
+    '==
+    '==     Returns the RootDSE of the current domain.
+    '==
+    '==     Returns:
+    '==          DC=gwnet,DC=nl
+    '==
+    Dim     objRootDse
+    
+	Set objRootDse = GetObject("LDAP://RootDse")
+    AdGetRootDse = objRootDse.get("defaultNamingContext")
+    Set objRootDse = Nothing
+End Function '== AdGetRootDse
+
+
+
+Function ConfigReadSettingSection(sSection, sSetting)
+    ''
+    ''     Verbeterde versie 2009-04-02
+    ''
+    ''     Reads a setting from a .conf file and returns the value.
+    ''
+    ''     Name the file.csv the same as the script but with a csv extension.
+    ''    
+    ''     ----- FILE_NAME_AS_SCRIPT.VBS ---
+    ''
+    ''     Function_ConfigReadSettingSection.vbs -- Config file.
+    ''
+    ''    
+    ''     [Section1]
+    ''     Name=Whatever is the biatch
+    ''     Name=Perry
+    ''    
+    ''     [Section2]
+    ''     Name=Adrian
+    ''
+    ''     [Section3]
+    ''     Name=Jill
+    ''     ------------------
+    ''
+    ''     Example looping for more entries:
+    ''     Dim     x
+    ''     Dim     bAgain
+    ''     Dim     sLogEntry
+    ''     bAgain = True
+    ''     x = 1
+    ''     Do
+    ''          sLogEntry = ConfigReadSetting("LogEntry" & x)
+    ''    
+    ''          If IsEmpty(sLogEntry) Then
+    ''               bAgain = False
+    ''          Else
+    ''          WScript.Echo x & ": [" & sLogEntry & "]"
+    ''          End If
+    ''          x = x + 1
+    ''     Loop Until bAgain = False
+    ''
+    ''     Remark: Convert strings to Integers for numbers
+    ''          n = Int(ConfigReadSetting("", "Number"))
+	'
+	'	Uses:
+	'		GetScriptNameMinVersion()
+	'
+    '
+    Const     FOR_READING = 1
+    Const     SEPERATOR = "="
+    
+    Dim     sLine
+    Dim     oFso
+    Dim     oFile
+    Dim     sPath
+    Dim     sReturn
+    Dim     bInSection
+    Dim     sSectionSelect
+    
+	'WScript.Echo "sSection="&sSection
+	'WScript.Echo "sSetting="&sSetting
+	
+    sReturn = ""
+    
+    Set oFso = CreateObject("Scripting.FileSystemObject")
+     
+	
+	' WScript.Echo "ScriptPath="& WScript.ScriptFullName
+	 
+	' Build the path for the configuration file. x:\folder\script.vbs >> x:\folder\script.config
+	sPath = Replace(WScript.ScriptFullName, ".vbs", ".config")
+	Set oFile = oFso.OpenTextFile(sPath, FOR_READING)
+    
+     sSectionSelect = "[" & sSection & "]"
+    
+    'WScript.Echo "ConfigReadSetting(): sSection="&sSection
+    
+    If sSectionSelect = "[]" Then
+        'WScript.Echo "No section specified"
+         
+         Do While oFile.AtEndOfStream <> True
+            sLine = oFile.ReadLine
+              
+            '' If in the line is a seperator char or does not start with a quote, it's a config line.
+            If (InStr(sLine, SEPERATOR) > 0) And (Left(sLine, 1) <> "'") Then
+                '' Check if the value of sSetting is in the line.
+                If InStr(sLine, sSetting) > 0 Then
+                    sReturn = Right(sLine, Len(sLine) - InStr(sLine, SEPERATOR))
+                     Exit Do
+                End If
+            End If
+        Loop
+    Else
+		'WScript.Echo "Section " & sSectionSelect & " specified"
+                   
+        bInSection = False
+         
+        Do While oFile.AtEndOfStream <> True
+            sLine = oFile.ReadLine
+         
+			If InStr(sLine, sSectionSelect) > 0 Then
+                'WScript.Echo "Found Section " & sSectionSelect
+                bInSection = True
+            End If
+         
+            If bInSection = True Then
+                '' If in the line is a seperator char or does not start with a quote, it's a config line.
+                If (InStr(sLine, SEPERATOR) > 0) And (Left(sLine, 1) <> "'") Then
+                    '' Check if the value of sSetting is in the line.
+                    If InStr(sLine, sSetting) > 0 Then
+                        sReturn = Right(sLine, Len(sLine) - InStr(sLine, SEPERATOR))
+                        Exit Do
+                    End If
+                End If
+            End If
+        Loop
+    End If
+    
+    oFile.Close
+    Set oFile = Nothing
+    
+    Set oFso = Nothing
+
+    ConfigReadSettingSection = sReturn
+End Function '' ConfigReadSettingSection
+
+
+
+Function GetScriptNameMinVersion
+    '
+    '	GetScriptName
+	'	
+	'	Return the name of the current script with or without a version number.
+	'	
+	'	Variables:
+	'		blnMinusVersion		True returns the script name minus the version: ScriptName-02 > ScriptName
+	'
+	'	Returns:
+    '		GetScriptName(True)		ScriptName
+	'		GetScriptName(False)	ScriptName-03
+	'
+    Dim	strScriptName
+	Dim	strReturn
+
+	strScriptName = WScript.ScriptName						'' Get the current script name
+	strScriptName = Replace(strScriptName, ".vbs", "")		'' Remove the file extension
+	
+	If InStr(strScriptName, "-") > 0 Then
+		strReturn = left(strScriptName, InStrRev(strScriptName, "-") - 1)
+	Else
+		strReturn = Left(strScriptName, InStrRev(strScriptName, ".") - 1)
+	End If
+	
+     GetScriptNameMinVersion = strReturn
+End Function '' GetScriptName
+
+
+
+Class ClassTextFile
+	'
+	'	General class to handle file operations for text files .
+	'
+	'	Parent class for
+	'		ClassTextFileTsv
+	'		ClassTextFileSplunk
+	'
+	'	Class Subs and Functions:
+	'		Private Sub Class_Initialize				Class initializer sub, set all default values
+	'		Private Sub Class_Terminate					Class terminator, releases all variables, etc..
+	'		Public Sub SetPath(ByVal strPathNew)		Sets the path to the file.
+	'		Public Function GetPath						Returns the path of the file C:\folder\file.ext
+	'		Public Sub SetMode							Set the mode of access for the file (READ, WRITE, APPEND)
+	'		Public Sub OpenFile							Open the file
+	'		Public Sub CloseFile						Closes the file
+	'		Public Sub WriteToFile(ByVal strLine)		Write a line to the file
+	'		Public Function ReadFromFile()				Read a line from the  file
+	'		Public Sub DeleteFile						Delete the file
+	'		Function IsEndOfFile						Boolean returns the end of the file reached
+	'		Public Function CurrentLine()				Returns the current line number
+	'
+
+	Private		objFso	
+	Private		objFile
+	Private		strPath
+	Private		blnIsOpen
+	Private		intMode				'	Modus of file activity, READING=1, WRITING=2, APPENDING=8
+	Private		intLineCount
+	
+	Private Sub Class_Initialize
+		'
+		'	Class initializer, open objects, set default variable values.
+		'
+		Set objFso = CreateObject("Scripting.FileSystemObject")
+		blnIsOpen = False
+		intLineCount = 0
+	End Sub '' Class_Initialize
+
+	Private Sub Class_Terminate
+		'
+		'	Class terminator, closes objects
+		'
+		Call CloseFile()
+		
+		'	Terminate the object to the text file
+		Set objFile = Nothing
+		
+		'	Terminate the object to the File System Object
+		Set objFso = Nothing
+	End Sub '' Class Terminate
+	
+	Public Sub SetPath(ByVal strPathNew)
+		'
+		'	Sets the path to the file.
+		'	Assumes all folders exist before calling this function
+		'
+		'If objFso.FileExists(strPathNew) = False Then
+		'	WScript.Echo "ClassTextFile.SetPath() ERROR: Path is not found!"
+		' End If
+		strPath = strPathNew
+	End Sub
+	
+	Public Function GetPath
+		'
+		'	Returns the current path. c:\folder\file.ext
+		'
+		GetPath = strPath
+	End Function
+	
+	Public Sub SetMode(intModeNew)
+		'
+		'	Set the mode of file opening
+		'		1:	READ
+		'		2:	WRITE
+		'		8:	APPEND
+		'
+		intMode = intModeNew
+	End Sub
+	
+	Public Function GetMode()
+		'
+		'	Return the mode of file opening.
+		'		1:	READ
+		'		2:	WRITE
+		'		8:	APPEND
+		'		
+		GetMode = intMode
+	End Function
+	
+	Public Sub OpenFile
+		'
+		'	Open the file strPath
+		'
+		On Error Resume Next
+		Set objFile = objFso.OpenTextFile(strPath, intMode, True)
+		If Err.Number = 0 Then
+			blnIsOpen = True
+		Else
+			WScript.Echo("ClassTextFile/OpenFile ERROR: Could not open textfile: " & strPath)
+		End If
+	End Sub
+	
+	Public Sub CloseFile()
+		'	
+		'	Closes the current opened file
+		'	
+		If blnIsOpen = False Then
+			objFile.Close
+		End If
+	End Sub
+	
+	Public Sub WriteLineToFile(ByVal strLine)
+		'
+		'	Write the contents of strLine to the text file.
+		'
+		If blnIsOpen = True Then
+			objFile.WriteLine(strLine)
+		Else
+			WScript.Echo "ClassTextFile/WriteLineToFile WARNING: Tried to write to a closed file: " & strPath
+		End If
+	End Sub
+	
+	Public Function ReadLineFromFile()
+		'
+		'	Read a line from the text file.
+		'	
+		'	Returns a string
+		'	Returns a empty string when nothing could be read.
+		'
+		If blnIsOpen = True Then
+			'	Increase the line counter +1
+			intLineCount = intLineCount + 1
+			
+			'	Read a line from the text file.
+			ReadLineFromFile = objFile.ReadLine
+		Else
+			ReadLineFromFile = ""
+			WScript.Echo "ClassTextFile/ReadLineFromFile WARNING: Tried to read from a closed file: " & strPath
+		End If
+	End Function
+	
+	Public Function CurrentLine()
+		'
+		'	Return the current line number.
+		'
+		CurrentLine = intLineCount
+	End Function
+	
+	Public Sub DeleteFile()
+		'
+		'	Delete the file
+		'	Close it if it is open.
+		'
+		If blnIsOpen = True Then
+			'	Close the file if it's open
+			Call CloseFile()
+			If objFso.FileExists(strPath) Then
+				'	Delete the file, always!
+				Call objFso.DeleteFile(strPath, True)
+			End If
+		End If
+   	End Sub
+	
+	Function IsEndOfFile()
+		'
+		'	Return the AtEndOfStreamStatus
+		'	
+		'	True	End of stream reached
+		'	False	No reached yet
+		'
+		IsEndOfFile = objFile.AtEndOfStream
+	End Function
+
+End Class	'	ClassTextFile
+
+
+
+'' End of script
