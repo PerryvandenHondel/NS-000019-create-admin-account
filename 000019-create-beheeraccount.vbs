@@ -32,15 +32,17 @@
 ''		Function GetScriptPath
 ''		Function GetTempFileName
 ''		Function RunCommand
-''		Sub RecordPrepare
-''		Sub RecordCreate
 ''		Sub	ScriptInit
 ''		Sub CreateNewAccount
 ''		Sub DeleteFile
 ''		Sub DsmodGroupAddMember
 ''		Sub MakeSameAs
+''		Sub RecordCreate
+''		Sub RecordPrepare
+''		Sub RecordInform		
 ''		Sub ScriptDone
 ''		Sub ScriptRun
+''		Sub SetNotDelegatedFlag
 
 
 
@@ -53,6 +55,7 @@ Const	FLD_NWA_ID =			"new_account_id"
 Const	FLD_NWA_FNAME = 		"first_name"
 Const	FLD_NWA_MNAME = 		"middle_name"
 Const	FLD_NWA_LNAME = 		"last_name"
+Const	FLD_NWA_TITLE = 		"title"
 Const	FLD_NWA_SUPP_ID = 		"supplier_id"
 Const	FLD_NWA_MOBILE = 		"mobile"
 Const	FLD_NWA_DOMAIN = 		"domain_id"
@@ -61,7 +64,7 @@ Const	FLD_NWA_USERNAME_SAME = "user_name_same"
 Const	FLD_NWA_MAIL = 			"mail"
 Const	FLD_NWA_PASSWORD = 		"password"
 Const	FLD_NWA_REF = 			"reference_number"
-Const	FLD_NWA_REQ_MAIL = 		"requestor_mail"
+Const	FLD_NWA_REQ_ID = 		"requestor_id"
 Const	FLD_NWA_STATUS = 		"status_id"
 Const	FLD_NWA_RCD = 			"rcd"
 Const	FLD_NWA_RLU = 			"rlu"
@@ -93,17 +96,16 @@ Dim		gobjSheet
 Dim		gobjFso
 Dim		gobjFile
 Dim		gstrDomainDns
-''Dim		gobjSplunkLog
 Dim		gobjShell
-Dim		tfNewAccount		'	Text File New Account; write all actions in this file.
-Dim		db		''	Global object to connect to the database
+Dim		tfNewAccount	'' Text File New Account; write all actions in this file.
+Dim		db				'' Global object to connect to the database
 
 
 
 Sub RecordSetStatus(ByVal intRecordId, ByVal intNewStatusId)
 	''
-	''	Update the status ID with a new ID, 
-	''	in case of errors.
+	'' Update the status ID with a new ID, 
+	'' in case of errors.
 	''
 	Dim 		qu
 	
@@ -138,6 +140,7 @@ Function GetDomainValues(ByVal strDomainId, ByVal strFieldName)
 End Function '' of Function GetDomainValues
 
 
+
 Function EncloseWithDQ(ByVal s)
 	''
 	''	Returns an enclosed string s with double quotes around it.
@@ -156,6 +159,24 @@ Function EncloseWithDQ(ByVal s)
 
 	EncloseWithDQ = s
 End Function '' of Function EncloseWithDQ
+
+
+
+Sub SetNotDelegatedFlag(ByVal strDomainId, ByVal strUserName)
+	''
+	''	Set the not delegated flag in the UserAccountControl
+	''	NOT_DELEGATED - When this flag is set, the security context of the user is not delegated to a service even if the service account is set as trusted for Kerberos delegation.
+	''
+	''	Source:	https://support.microsoft.com/en-us/kb/305144
+	''
+	Dim		c
+	
+	'adfind.exe -b "DC=prod,DC=ns,DC=nl" -f "sAMAccountName=BEH_WMIScanProject" userAccountControl -adcsv | admod userAccountControl::{{.:SET:1048576}}	
+	c = "adfind.exe -b " & EncloseWithDQ(strDomainId) & " -f " & EncloseWithDQ("sAMAccountName=" & strUserName) & " userAccountControl -adcsv | admod.exe userAccountControl::{{.:SET:1048576}}"
+	'c = "admod.exe -b " & EncloseWithDQ(strDn) & " userAccountControl::{{.:SET:1048576}}"
+	WScript.Echo c
+	'Call RunCommand(c)
+End Sub '' of Sub SetNotDelegatedFlag
 
 
 
@@ -224,22 +245,37 @@ End Sub '' of Sub PrepareRecords
 
 
 Sub RecordCreate(ByVal intStatusId)
+	''
+	'' Create new accounts when status is intStatusId
+	''
 	Const	NEXT_STATUS = 200
 	
+	Dim		c
+	Dim		chrUseSupplierOu
+	Dim		dn
+	Dim		intRecordId
 	Dim		qs			'' Query Select
 	Dim		qu			'' Query Update
 	Dim		rs			'' RecordSet
-	Dim		strUserName
-	Dim		intRecordId
-	Dim		strSupplierId
-	Dim		strPassword
+	Dim		strDescription
 	Dim		strDomainId
-	Dim		strRootDse
-	Dim		strUserUpn
-	Dim		dn
+	Dim		strFirstName
+	Dim		strLastName
+	Dim		strMiddleName
+	Dim		strMobile
 	Dim		strOrgUnit
-	Dim		chrUseSupplierOu
+	Dim		strPassword
+	Dim		strReference
+	Dim		strRequestor
+	Dim		strRootDse
+	Dim		strSupplierId
+	Dim		strTitle
 	Dim		strUserDn
+	Dim		strUserName
+	Dim		strUserNameSame
+	Dim		strUserNameSameDn
+	Dim		strUserUpn
+	Dim		d			'' DN of Default groups.
 
 	'' Build a select query to get all records with status 0 (all new records)
 	qs = "SELECT * "
@@ -260,7 +296,6 @@ Sub RecordCreate(ByVal intStatusId)
 			WScript.Echo "RECORD ID="& intRecordId
 			
 			strUserName = rs(FLD_NWA_USERNAME).Value
-			strPassword = rs(FLD_NWA_PASSWORD).Value
 			
 			WScript.Echo "CREATE NEW ACCOUNT " & strUserName
 			
@@ -281,6 +316,8 @@ Sub RecordCreate(ByVal intStatusId)
 
 				strOrgUnit = GetDomainValues(strDomainId, FLD_DMN_OU)
 				
+				strSupplierId = rs(FLD_NWA_SUPP_ID).Value
+				
 				chrUseSupplierOu = GetDomainValues(strDomainId, FLD_DMN_USE_SUPPLIER_OU)
 				
 				strUserUpn = LCase(strUserName & "@" & GetDomainValues(strDomainId, FLD_DMN_UPN))
@@ -288,28 +325,129 @@ Sub RecordCreate(ByVal intStatusId)
 				
 				WScript.Echo strOrgUnit
 				WScript.Echo chrUseSupplierOu
-				
 				strUserDn = "CN=" & strUserName & ","
 				If UCase(chrUseSupplierOu) = "Y" Then
-					
+					'' We are placing the user accounts under a supplier specific OU.
 					strUserDn = strUserDn & "OU=" & rs(FLD_NWA_SUPP_ID).Value & ","
 				End If
 				strUserDn = strUserDn & strOrgUnit & "," & strDomainId
-				
 				WScript.Echo "User DN=" & strUserDn
 				
+				strReference = rs(FLD_NWA_REF).Value
+				strRequestor = rs(FLD_NWA_REQ_ID).Value
+				strDescription = "CALL=" & strReference & " REQUEST_BY=" & strRequestor
+				WScript.Echo strDescription
 				
+				strPassword = rs(FLD_NWA_PASSWORD).Value
 				
+				strFirstName = rs(FLD_NWA_FNAME).Value
+				strMiddleName = rs(FLD_NWA_MNAME).Value
+				strLastName = rs(FLD_NWA_LNAME).Value
+				strTitle = rs(FLD_NWA_TITLE).Value
+				strMobile = rs(FLD_NWA_MOBILE).Value
 				
+				'	Build the command line to create a new account using DSADD.EXE
+				c = "dsadd user " & EncloseWithDQ(strUserDn) & " "
+				c = c & "-samid " & EncloseWithDQ(strUserName) & " "
+				c = c & "-pwd " & EncloseWithDQ(strPassword) & " "
+				c = c & "-fn " & EncloseWithDQ(Trim(strFirstName & " " & strMiddleName)) & " "
+				c = c & "-ln " & EncloseWithDQ(strLastName) & " "
+				c = c & "-title " & EncloseWithDQ(strTitle) & " "
+				c = c & "-desc " & EncloseWithDQ(strDescription) & " "
+				c = c & "-display " & EncloseWithDQ(strUserName) & " "
+				c = c & "-upn " & EncloseWithDQ(strUserUpn) & " "
 				
+				If Len(strMobile) > 0 Then
+					c = c & "-mobile " & EncloseWithDQ(strMobile) & " "
+				End If
+				c = c & "-company " & EncloseWithDQ(strSupplierId) & " "
+				c = c & "-mustchpwd yes"
+				
+				'' Execute the DSADD command to create the account
+				WScript.Echo c
+				gobjShell.Run "cmd /c " & c, 0, True
+				
+				'' Sleap for 2 seconds before continuing
+				WScript.Sleep 2000
+				
+				'' Add account to default groups
+				If strDomainId = "DC=prod,DC=ns,DC=nl" Then
+					'' Add account to the SmartXS groups, only for PROD.
+					
+					'' Add default group ROL_SmartXS_Autorisatie
+					d = DsutilsGetDnFromSam(strDomainId, "group", "RP_SmartXS_Autorisatie") ' Was ROL_SmartXS_Autorisatie
+					Call DsmodGroupAddMember(d, strUserDn)
+
+					'' Add default group for BONS Autorisatie
+					d = DsutilsGetDnFromSam(strDomainId, "group", "RP_BONS_Autorisatie") ' 2014-12-29 PVDH Kan de groep niet vinden in PROD.NS.NL
+					Call DsmodGroupAddMember(d, strUserDn)
+				End If
+				
+				'' Set the not delegated flag on the user account by poking UserAccountControl
+				Call SetNotDelegatedFlag(strDomainId, strUserName)			
+
+				'' Make the account similar as a reference account
+				strUserNameSame = rs(FLD_NWA_USERNAME_SAME).Value
+				If Len(strUserNameSame) > 0 Then
+					'' A reference account to copy the groups from has been provided
+					
+					'' Get the DN of the source user
+					strUserNameSameDn = DsutilsGetDnFromSam(strDomainId, "user", strUserNameSame)
+					
+					'' Now copy the groups from strUserNameSameDn to strUserDn
+					Call MakeSameAs(strUserNameSameDn, strUserDn)
+				Else
+					WScript.Echo "INFO: No source account was provided so the account has no ROLE groups at this moment"
+				End If
 			End If
 			
+			Call RecordSetStatus(intRecordId, NEXT_STATUS)
 			rs.MoveNext '' Next record
 		Wend
 		Set rs = Nothing
 	End If
 End Sub '' of Sub RecordCreate
 
+
+
+Sub RecordInform(ByVal intStatusId)
+	''
+	''	Process al records that have status intStatusId
+	''
+	''
+	
+	Const	NEXT_STATUS = 900
+	
+	Dim		qs			'' Query Select
+	Dim		qu			'' Query Update
+	Dim		rs			'' RecordSet
+	Dim		intRecordId
+	
+
+	qs = "SELECT * "
+	qs = qs & "FROM " & TBL_NWA & " "
+	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
+	Else
+		WScript.Echo "RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
+		rs.MoveFirst
+		While Not rs.EOF
+			intRecordId = rs(FLD_NWA_ID).Value
+			
+			
+		
+		
+			Call RecordSetStatus(intRecordId, NEXT_STATUS)
+			rs.MoveNext '' Next record
+		Wend
+		Set rs = Nothing
+	End If
+End Sub '' of Sub RecordInfom
 
 
 Sub	ScriptInit()
@@ -487,7 +625,7 @@ Sub ScriptRun()
 	
 	Call RecordPrepare(0)
 	Call RecordCreate(100)
-
+	Call RecordInform(200)
 End Sub ' ScriptRun
 
 
@@ -528,7 +666,9 @@ Sub ScriptTest()
 	' s = "BEH_Perry.vdHondel"
 	'WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
 	
-	WScript.Echo GetDomainValues("DC=prod,DC=ns,DC=nl", FLD_DMN_UPN)
+	'WScript.Echo GetDomainValues("DC=prod,DC=ns,DC=nl", FLD_DMN_UPN)
+	
+	Call SetNotDelegatedFlag("DC=test,DC=ns,DC=nl", "NSA_Pieter.Post")
 	
 	'For x = 1 To 1500
 	'	WScript.Echo x & ":" & vbTab & GeneratePassword()
