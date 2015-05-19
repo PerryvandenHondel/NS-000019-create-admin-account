@@ -59,7 +59,7 @@ Const	FLD_NWA_MAIL = 			"mail"
 Const	FLD_NWA_PASSWORD = 		"password"
 Const	FLD_NWA_REF = 			"reference_number"
 Const	FLD_NWA_REQ_MAIL = 		"requestor_mail"
-Const	FLD_NWA_STATUS = 		"status"
+Const	FLD_NWA_STATUS = 		"new_account_status_id"
 Const	FLD_NWA_RCD = 			"rcd"
 Const	FLD_NWA_RLU = 			"rlu"
 
@@ -90,30 +90,94 @@ Dim		db		''	Global object to connect to the database
 
 
 
+Sub PrepareRecords(ByVal intStatusId)
+	''
+	'' Prepare all records to fill in the gaps,
+	'' with username, password etc.
+	''
+	Const	NEXT_STATUS = 100
+	
+	Dim		qs			'' Query Select
+	Dim		qu			'' Query Update
+	Dim		rs			'' RecordSet
+	
+	Dim		strUserName
+	Dim		strFirstName
+	Dim		strMiddleName
+	Dim		strLastName
+	Dim		intRecordId
+	Dim		strCompany
+	Dim		strPassword
+
+	'' Build a select query to get all records with status 0 (all new records)
+	qs = "SELECT * "
+	qs = qs & "FROM " & TBL_NWA & " "
+	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		WScript.Echo "NO RECORDS FOUND " & qs
+	Else
+		WScript.Echo "RECORDS FOUND " & qs
+		rs.MoveFirst
+		While Not rs.EOF
+			intRecordId = rs(FLD_NWA_ID).Value
+			
+			strFirstName = rs(FLD_NWA_FNAME).Value
+			strMiddleName = rs(FLD_NWA_MNAME).Value
+			strLastName = rs(FLD_NWA_LNAME).Value
+			strCompany = rs(FLD_NWA_COMP).Value
+			strUserName = GenerateAccountName(strCompany, strFirstName, strMiddleName, strLastName)
+			
+			WScript.Echo "strUserName=" & strUserName
+			
+			strPassword = GeneratePassword()
+			WScript.Echo "strPassword=" & strPassword
+			
+			'' The variables are filled with valid values.
+			'' Update the table.
+			qu = "UPDATE " & TBL_NWA & " "
+			qu = qu & "SET "
+			qu = qu & FLD_NWA_USERNAME & "=" & db.FixStr(strUserName) & ","
+			qu = qu & FLD_NWA_PASSWORD & "=" & db.FixStr(strPassword) & ","
+			qu = qu & FLD_NWA_STATUS & "=" & NEXT_STATUS & ","
+			qu = qu & FLD_NWA_RLU & "=" & db.FixDtm(Now()) & " "
+			qu = qu & "WHERE " & FLD_NWA_ID & "=" & intRecordId & ";"
+			
+			db.ExecQuery(qu)
+			''WScript.Echo qu
+			rs.MoveNext                                        'next foudn object 
+		Wend
+		Set rs = Nothing
+	End If
+	
+End Sub '' of Sub PrepareRecords
+
+
 Sub	ScriptInit()
 	Dim	strRootLog
 	
 	' Get the current RootDSE location.
-	gstrRootDse = AdGetRootDse
+	'gstrRootDse = AdGetRootDse
 	
 	
 	'gstrRootDse = "DC=acceptatie,DC=ns,DC=nl"
-	WScript.Echo "gstrRootDse=" & gstrRootDse
+	'WScript.Echo "gstrRootDse=" & gstrRootDse
 	
 	' 2015-02-19 PVDH: Use file 000019-input.xls
-	gstrPathExcel = GetScriptPath & "000019-input.xlsx"
+	'gstrPathExcel = GetScriptPath & "000019-input.xlsx"
 	'gstrPathExcel = GetScriptPath & "input.xlsx"
 	
-	WScript.Echo "Using Excel file: " & gstrPathExcel
+	'WScript.Echo "Using Excel file: " & gstrPathExcel
 	
-	Set gobjExcel = CreateObject("Excel.Application")
-	Set gobjSheet = gobjExcel.Workbooks.Open(gstrPathExcel)
+	'Set gobjExcel = CreateObject("Excel.Application")
+	'Set gobjSheet = gobjExcel.Workbooks.Open(gstrPathExcel)
 	
 	Set gobjFso = CreateObject("Scripting.FileSystemObject")
 	
 	Set gobjShell = CreateObject("WScript.Shell")
 	
-	strRootLog = "\\nsd0dt00140.prod.ns.nl\logs$"
+	'strRootLog = "\\nsd0dt00140.prod.ns.nl\logs$"
 	
 	'' Connect to the class object SplunkLog
 	'Set gobjSplunkLog = New SplunkLog_06
@@ -163,8 +227,7 @@ Sub ScriptRun()
 	Dim		strPreWin2000
 	Dim		strRequestedBy
 	
-	Dim		qs			'' Query Select
-	Dim		rs			'' RecordSet
+
 	
 	WScript.Echo 
 	
@@ -264,24 +327,8 @@ Sub ScriptRun()
 		'intRow = intRow + 1
 	'Loop
 	
-	'' Build a select query to get all records with status 0 (all new records)
-	qs = "SELECT * "
-	qs = qs & "FROM " & TBL_NWA & " "
-	qs = qs & "WHERE " & FLD_NWA_STATUS & "=0;"
-	
-	Call db.GetRecordSet(rs, qs)
-	If rs.Eof = True Then
-		WScript.Echo "NO RECORDS FOUND " & qs
-		
-	Else
-		WScript.Echo "RECORDS FOUND " & qs
-		rs.MoveFirst
-		While Not rs.EOF
-			WScript.Echo rs(FLD_NWA_ID).Value
-			rs.MoveNext                                        'next foudn object 
-		Wend
-		Set rs = Nothing
-	End If
+	PrepareRecords(0)
+
 End Sub ' ScriptRun
 
 
@@ -297,11 +344,9 @@ Sub ScriptDone()
 	
 	Set gobjFso = Nothing
 
-	Set gobjSheet = Nothing
-	
-	gobjExcel.Quit
-	
-	Set gobjExcel = Nothing
+	'Set gobjSheet = Nothing
+	'gobjExcel.Quit
+	'Set gobjExcel = Nothing
 End Sub
 
 
@@ -673,42 +718,46 @@ Function FixMiddleName(strMiddleName)
 	Dim	strPrefix
 	Dim	x
 	
-	'WScript.Echo "FixMiddleName(" & strMiddleName & ")"
+	WScript.Echo "FixMiddleName(" & strMiddleName & ")"
+	If Len(strMiddleName) > 0 Then
 	
-	' Convert the string in lower case.
-	strMiddleName = LCase(strMiddleName)
+		' Convert the string in lower case.
+		strMiddleName = LCase(strMiddleName)
 	
-	' Remove all quote's (') in the middle name.
-	strMiddleName = Replace(strMiddleName, "'", "")
+		' Remove all quote's (') in the middle name.
+		strMiddleName = Replace(strMiddleName, "'", "")
 	
-	' Vul de string met velden van de array.
-	strPrefix = "van den|vd"
-	strPrefix = strPrefix & "|van der|vd"
-	strPrefix = strPrefix & "|van den|vd"
-	strPrefix = strPrefix & "|van de|vd"
-	strPrefix = strPrefix & "|van t|vt"
-	strPrefix = strPrefix & "|ten|t"
-	strPrefix = strPrefix & "|van|v"
-	strPrefix = strPrefix & "|den|d" 
-	strPrefix = strPrefix & "|de|d" 	
-	strPrefix = strPrefix & "|in t|it"
-	strPrefix = strPrefix & "|t|t"
-	strPrefix = strPrefix & "|la|l"
-	strPrefix = strPrefix & "|le|l"
+		' Vul de string met velden van de array.
+		strPrefix = "van den|vd"
+		strPrefix = strPrefix & "|van der|vd"
+		strPrefix = strPrefix & "|van den|vd"
+		strPrefix = strPrefix & "|van de|vd"
+		strPrefix = strPrefix & "|van t|vt"
+		strPrefix = strPrefix & "|ten|t"
+		strPrefix = strPrefix & "|van|v"
+		strPrefix = strPrefix & "|den|d" 
+		strPrefix = strPrefix & "|de|d" 	
+		strPrefix = strPrefix & "|in t|it"
+		strPrefix = strPrefix & "|t|t"
+		strPrefix = strPrefix & "|la|l"
+		strPrefix = strPrefix & "|le|l"
 	
-	' Convert the Prefix string to an array.
-	arrPrefix = Split(strPrefix, "|")
+		' Convert the Prefix string to an array.
+		arrPrefix = Split(strPrefix, "|")
 	
-	For x = 0 To UBound(arrPrefix) Step 2
-		'WScript.Echo x & vbTab & arrPrefix(x) & vbTab & arrPrefix(x + 1)
-		If InStr(1, strMiddleName, arrPrefix(x), vbTextCompare) > 0 Then
-			strMiddleName = Replace(strMiddleName, arrPrefix(x), arrPrefix(x + 1))
-			Exit For
-		End If
-	Next
+		For x = 0 To UBound(arrPrefix) Step 2
+			'WScript.Echo x & vbTab & arrPrefix(x) & vbTab & arrPrefix(x + 1)
+			If InStr(1, strMiddleName, arrPrefix(x), vbTextCompare) > 0 Then
+				strMiddleName = Replace(strMiddleName, arrPrefix(x), arrPrefix(x + 1))
+				Exit For
+			End If
+		Next
 
-	'WScript.Echo "FixMiddleName(): " & strMiddleName
-	FixMiddleName = strMiddleName
+		'WScript.Echo "FixMiddleName(): " & strMiddleName
+		FixMiddleName = strMiddleName
+	Else	
+		FixMiddleName = ""
+	End If
 End Function ' FixMiddleName
 
 
@@ -725,7 +774,7 @@ End Function ' FixLastname()
 
 
 
-Function FixFirstname(strName)
+Function FixFirstName(strName)
 	' Remove all quote's (') in the last name.
 	strName = Replace(strName, " ", "")
 	
