@@ -66,6 +66,13 @@ Const	FLD_NWA_STATUS = 		"status_id"
 Const	FLD_NWA_RCD = 			"rcd"
 Const	FLD_NWA_RLU = 			"rlu"
 
+Const	TBL_DMN = 				"new_account_domain"
+Const	FLD_DMN_ID = 			"domain_id"
+Const	FLD_DMN_UPN = 			"upn"
+Const	FLD_DMN_NT = 			"domain_nt"
+Const	FLD_DMN_OU = 			"org_unit"
+Const	FLD_DMN_USE_SUPPLIER_OU = "use_supplier_ou"
+
 Const	MAX_ACCOUNT_LEN		=	20
 
 Const	ADS_NAME_INITYPE_GC =	3
@@ -109,6 +116,26 @@ Sub RecordSetStatus(ByVal intRecordId, ByVal intNewStatusId)
 	db.ExecQuery(qu)
 End Sub
 
+
+
+Function GetDomainValues(ByVal strDomainId, ByVal strFieldName)
+	Dim		qs
+	Dim		rs
+	Dim		r	'' Function result
+	
+	qs = "SELECT " & strFieldName & " "
+	qs = qs & "FROM " & TBL_DMN & " "
+	qs = qs & "WHERE " & FLD_DMN_ID & "=" & db.FixStr(strDomainId) & ";"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		r = ""
+	Else
+		rs.MoveFirst
+		r = rs(strFieldName).Value
+	End If
+	GetDomainValues = r
+End Function '' of Function GetDomainValues
 
 
 Function EncloseWithDQ(ByVal s)
@@ -206,8 +233,13 @@ Sub RecordCreate(ByVal intStatusId)
 	Dim		intRecordId
 	Dim		strSupplierId
 	Dim		strPassword
+	Dim		strDomainId
 	Dim		strRootDse
+	Dim		strUserUpn
 	Dim		dn
+	Dim		strOrgUnit
+	Dim		chrUseSupplierOu
+	Dim		strUserDn
 
 	'' Build a select query to get all records with status 0 (all new records)
 	qs = "SELECT * "
@@ -224,26 +256,47 @@ Sub RecordCreate(ByVal intStatusId)
 		rs.MoveFirst
 		While Not rs.EOF
 			intRecordId = rs(FLD_NWA_ID).Value
+			WScript.Echo String(80, "-")
+			WScript.Echo "RECORD ID="& intRecordId
 			
 			strUserName = rs(FLD_NWA_USERNAME).Value
-			WScript.Echo "strUserName=" & strUserName
-			
 			strPassword = rs(FLD_NWA_PASSWORD).Value
-			WScript.Echo "strPassword=" & strPassword
+			
+			WScript.Echo "CREATE NEW ACCOUNT " & strUserName
 			
 			strRootDse = rs(FLD_NWA_DOMAIN).Value
 			
 			dn = DsutilsGetDnFromSam(strRootDse, "user", strUserName)
-			WScript.Echo dn
 			
 			If Len(dn) > 0 Then
 				'' The result of DsutilsGetDnFromSam contains a DN path, so the account exist
 				WScript.Echo "WARNING: Account " & strUserName & " already exists in " & strRootDse
-				''tfNewAccount.WriteLineToFile("WARNING: Account " & strAccountName & " already exists in AD domain " & strRootDseXls)
+				
+				'' Account already exist in the domain.
 				Call RecordSetStatus(intRecordId, intStatusId + 1)
 			Else
 				'' The account does not exist, create it.
-				WScript.Echo "CREATE NEW ACCOUNT " & strUserName
+				
+				strDomainId = rs(FLD_NWA_DOMAIN).Value
+
+				strOrgUnit = GetDomainValues(strDomainId, FLD_DMN_OU)
+				
+				chrUseSupplierOu = GetDomainValues(strDomainId, FLD_DMN_USE_SUPPLIER_OU)
+				
+				strUserUpn = LCase(strUserName & "@" & GetDomainValues(strDomainId, FLD_DMN_UPN))
+				WScript.Echo "strUserUpn=" & strUserUpn
+				
+				WScript.Echo strOrgUnit
+				WScript.Echo chrUseSupplierOu
+				
+				strUserDn = "CN=" & strUserName & ","
+				If UCase(chrUseSupplierOu) = "Y" Then
+					
+					strUserDn = strUserDn & "OU=" & rs(FLD_NWA_SUPP_ID).Value & ","
+				End If
+				strUserDn = strUserDn & strOrgUnit & "," & strDomainId
+				
+				WScript.Echo "User DN=" & strUserDn
 				
 				
 				
@@ -475,9 +528,11 @@ Sub ScriptTest()
 	' s = "BEH_Perry.vdHondel"
 	'WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
 	
-	For x = 1 To 1500
-		WScript.Echo x & ":" & vbTab & GeneratePassword()
-	Next
+	WScript.Echo GetDomainValues("DC=prod,DC=ns,DC=nl", FLD_DMN_UPN)
+	
+	'For x = 1 To 1500
+	'	WScript.Echo x & ":" & vbTab & GeneratePassword()
+	'Next
 	
 	
 End Sub ' ScriptTest
