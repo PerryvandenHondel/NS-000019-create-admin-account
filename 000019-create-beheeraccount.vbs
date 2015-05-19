@@ -22,6 +22,7 @@
 ''		Function AdGetRootDse
 ''		Function ConfigReadSettingSection
 ''		Function DsutilsGetDnFromSam
+''		Function EncloseWithDQ
 ''		Function FixFirstname
 ''		Function FixLastName
 ''		Function FixMiddleName
@@ -31,6 +32,8 @@
 ''		Function GetScriptPath
 ''		Function GetTempFileName
 ''		Function RunCommand
+''		Sub RecordPrepare
+''		Sub RecordCreate
 ''		Sub	ScriptInit
 ''		Sub CreateNewAccount
 ''		Sub DeleteFile
@@ -50,16 +53,16 @@ Const	FLD_NWA_ID =			"new_account_id"
 Const	FLD_NWA_FNAME = 		"first_name"
 Const	FLD_NWA_MNAME = 		"middle_name"
 Const	FLD_NWA_LNAME = 		"last_name"
-Const	FLD_NWA_COMP = 			"company"
+Const	FLD_NWA_SUPP_ID = 		"supplier_id"
 Const	FLD_NWA_MOBILE = 		"mobile"
-Const	FLD_NWA_DOMAIN = 		"ad_domain"
+Const	FLD_NWA_DOMAIN = 		"domain_id"
 Const	FLD_NWA_USERNAME = 		"user_name"
 Const	FLD_NWA_USERNAME_SAME = "user_name_same"
 Const	FLD_NWA_MAIL = 			"mail"
 Const	FLD_NWA_PASSWORD = 		"password"
 Const	FLD_NWA_REF = 			"reference_number"
 Const	FLD_NWA_REQ_MAIL = 		"requestor_mail"
-Const	FLD_NWA_STATUS = 		"new_account_status_id"
+Const	FLD_NWA_STATUS = 		"status_id"
 Const	FLD_NWA_RCD = 			"rcd"
 Const	FLD_NWA_RLU = 			"rlu"
 
@@ -90,7 +93,46 @@ Dim		db		''	Global object to connect to the database
 
 
 
-Sub PrepareRecords(ByVal intStatusId)
+Sub RecordSetStatus(ByVal intRecordId, ByVal intNewStatusId)
+	''
+	''	Update the status ID with a new ID, 
+	''	in case of errors.
+	''
+	Dim 		qu
+	
+	qu = "UPDATE " & TBL_NWA & " "
+	qu = qu & "SET "
+	qu = qu & FLD_NWA_STATUS & "=" & intNewStatusId & ","
+	qu = qu & FLD_NWA_RLU & "=" & db.FixDtm(Now()) & " "
+	qu = qu & "WHERE " & FLD_NWA_ID & "=" & intRecordId & ";"
+			
+	db.ExecQuery(qu)
+End Sub
+
+
+
+Function EncloseWithDQ(ByVal s)
+	''
+	''	Returns an enclosed string s with double quotes around it.
+	''	Check for exising quotes before adding adding.
+	''
+	''	s > "s"
+	''
+	
+	If Left(s, 1) <> Chr(34) Then
+		s = Chr(34) & s
+	End If
+	
+	If Right(s, 1) <> Chr(34) Then
+		s = s & Chr(34)
+	End If
+
+	EncloseWithDQ = s
+End Function '' of Function EncloseWithDQ
+
+
+
+Sub RecordPrepare(ByVal intStatusId)
 	''
 	'' Prepare all records to fill in the gaps,
 	'' with username, password etc.
@@ -106,7 +148,7 @@ Sub PrepareRecords(ByVal intStatusId)
 	Dim		strMiddleName
 	Dim		strLastName
 	Dim		intRecordId
-	Dim		strCompany
+	Dim		strSupplierId
 	Dim		strPassword
 
 	'' Build a select query to get all records with status 0 (all new records)
@@ -116,9 +158,11 @@ Sub PrepareRecords(ByVal intStatusId)
 	
 	Call db.GetRecordSet(rs, qs)
 	If rs.Eof = True Then
-		WScript.Echo "NO RECORDS FOUND " & qs
+		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
 	Else
-		WScript.Echo "RECORDS FOUND " & qs
+		WScript.Echo "RECORDS FOUND  FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
 		rs.MoveFirst
 		While Not rs.EOF
 			intRecordId = rs(FLD_NWA_ID).Value
@@ -126,10 +170,8 @@ Sub PrepareRecords(ByVal intStatusId)
 			strFirstName = rs(FLD_NWA_FNAME).Value
 			strMiddleName = rs(FLD_NWA_MNAME).Value
 			strLastName = rs(FLD_NWA_LNAME).Value
-			strCompany = rs(FLD_NWA_COMP).Value
-			strUserName = GenerateAccountName(strCompany, strFirstName, strMiddleName, strLastName)
-			
-			WScript.Echo "strUserName=" & strUserName
+			strSupplierId = rs(FLD_NWA_SUPP_ID).Value
+			strUserName = GenerateAccountName(strSupplierId, strFirstName, strMiddleName, strLastName)
 			
 			strPassword = GeneratePassword()
 			WScript.Echo "strPassword=" & strPassword
@@ -146,12 +188,75 @@ Sub PrepareRecords(ByVal intStatusId)
 			
 			db.ExecQuery(qu)
 			''WScript.Echo qu
-			rs.MoveNext                                        'next foudn object 
+			rs.MoveNext '' Next record
 		Wend
 		Set rs = Nothing
 	End If
-	
 End Sub '' of Sub PrepareRecords
+
+
+
+Sub RecordCreate(ByVal intStatusId)
+	Const	NEXT_STATUS = 200
+	
+	Dim		qs			'' Query Select
+	Dim		qu			'' Query Update
+	Dim		rs			'' RecordSet
+	Dim		strUserName
+	Dim		intRecordId
+	Dim		strSupplierId
+	Dim		strPassword
+	Dim		strRootDse
+	Dim		dn
+
+	'' Build a select query to get all records with status 0 (all new records)
+	qs = "SELECT * "
+	qs = qs & "FROM " & TBL_NWA & " "
+	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
+	Else
+		WScript.Echo "RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
+		rs.MoveFirst
+		While Not rs.EOF
+			intRecordId = rs(FLD_NWA_ID).Value
+			
+			strUserName = rs(FLD_NWA_USERNAME).Value
+			WScript.Echo "strUserName=" & strUserName
+			
+			strPassword = rs(FLD_NWA_PASSWORD).Value
+			WScript.Echo "strPassword=" & strPassword
+			
+			strRootDse = rs(FLD_NWA_DOMAIN).Value
+			
+			dn = DsutilsGetDnFromSam(strRootDse, "user", strUserName)
+			WScript.Echo dn
+			
+			If Len(dn) > 0 Then
+				'' The result of DsutilsGetDnFromSam contains a DN path, so the account exist
+				WScript.Echo "WARNING: Account " & strUserName & " already exists in " & strRootDse
+				''tfNewAccount.WriteLineToFile("WARNING: Account " & strAccountName & " already exists in AD domain " & strRootDseXls)
+				Call RecordSetStatus(intRecordId, intStatusId + 1)
+			Else
+				'' The account does not exist, create it.
+				WScript.Echo "CREATE NEW ACCOUNT " & strUserName
+				
+				
+				
+				
+				
+			End If
+			
+			rs.MoveNext '' Next record
+		Wend
+		Set rs = Nothing
+	End If
+End Sub '' of Sub RecordCreate
+
 
 
 Sub	ScriptInit()
@@ -210,7 +315,7 @@ Sub ScriptRun()
 	Dim		strFirstName
 	Dim		strMiddleName
 	Dim		strLastName
-	Dim		strCompany
+	Dim		strSupplierId
 	Dim		strDescription
 	Dim		strSameAs
 	Dim		strTitle			''	 Funtietitel van de beheerder. 
@@ -327,7 +432,8 @@ Sub ScriptRun()
 		'intRow = intRow + 1
 	'Loop
 	
-	PrepareRecords(0)
+	Call RecordPrepare(0)
+	Call RecordCreate(100)
 
 End Sub ' ScriptRun
 
@@ -354,19 +460,26 @@ End Sub
 Sub ScriptTest()
 	Dim		s
 	Dim		r
+	Dim		x
 	
 	WScript.Echo
 	WScript.Echo "TESTING!!"
 	
-	r = "DC=prod,DC=ns,DC=nl"
-	s = "Perry.vandenHondel"
-	WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
+	'r = "DC=prod,DC=ns,DC=nl"
+	's = "Perry.vandenHondel"
+	'WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
 	
-	s = "Rudolf.TheRedNosedReendeer"
-	WScript.Echo "DN for " & s & " = " &DsutilsGetDnFromSam(r, "user", s)
+	's = "Rudolf.TheRedNosedReendeer"
+	'WScript.Echo "DN for " & s & " = " &DsutilsGetDnFromSam(r, "user", s)
 	
-	s = "BEH_Perry.vdHondel"
-	WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
+	' s = "BEH_Perry.vdHondel"
+	'WScript.Echo "DN for " & s & " = " & DsutilsGetDnFromSam(r, "user", s)
+	
+	For x = 1 To 1500
+		WScript.Echo x & ":" & vbTab & GeneratePassword()
+	Next
+	
+	
 End Sub ' ScriptTest
 
 
@@ -787,11 +900,14 @@ End Function ' FixLastname()
 
 
 Function GeneratePassword()
-	'
-	'	Generate a new password based on Scrabble 4-letter words.
-	'
-	'	Returns: JAME-axil-05 (example) (uppercase-lowercase-day)
-	'
+	''
+	''	Generate a new password based on Scrabble 4-letter words.
+	''
+	''		
+	''	Returns: 
+	''		JAME-axil-05 (example) (uppercase-lowercase-day)
+	''		123456789012
+	''
 	Dim	strReturn
 	Dim	strWord
 	Dim	arrWord
@@ -800,6 +916,7 @@ Function GeneratePassword()
 	Dim	intMin
 	Dim	strWord1
 	Dim	strWord2
+	Dim		r
 	
 	' Set the number randomizer
 	Randomize
@@ -812,7 +929,7 @@ Function GeneratePassword()
 		"JARS;JATO;JAUK;JAUP;JAVA;JAWS;JAYS;JAZZ;JEAN;JEED;JEEP;JEER;JEES;JEEZ;JEFE;JEHU;JELL;JEON;JERK;JESS;JEST;" & _
 		"JETE;JETS;JEUX;JIAO;JIBB;JIBE;JIBS;JIFF;JIGS;JILL;JILT;JIMP;JINK;JINN;JINS;JINX;JISM;JIVE;JOBS;JOCK;" & _
 		"JOES;JOEY;JOGS;JOHN;JOIN;JOKE;JOKY;JOLE;JOLT;JOSH;JOSS;JOTA;JOTS;JOUK;JOWL;JOWS;JOYS;JUBA;JUBE;JUDO;JUGA;" & _
-		"JUGS;JUJU;JUKE;JUMP;JUNK;JUPE;JURA;JURY;JUST;JUTE;JUTS;MOJO;PUJA;RAJA;SOJA;RAIL;NAIL;"
+		"JUGS;JUJU;JUKE;JUMP;JUNK;JUPE;JURA;JURY;JUST;JUTE;JUTS;MOJO;PUJA;RAJA;SOJA;RAIL;NAIL;ZARA;ZAZA;YULO"
 		
 	' Fill the array with the words.
 	arrWord = Split(strWord, ";")
@@ -826,8 +943,13 @@ Function GeneratePassword()
 	strWord2 = arrWord(Int((intMax - intMin + 1) * Rnd + intMin))
 	
 	' Return the generated password. Format XXXX@xxxx00
-	GeneratePassword = UCase(strWord1) & "-" & LCase(strWord2) & "-" & Right("0" & Day(Date), 2)
-End Function  ' GeneratePassword
+	r = UCase(strWord1) & "-" & LCase(strWord2) & "-" & Right("0" & Day(Date), 2)
+	If Len(r) <> 12 Then
+		'' When the password is not 12 chars long, generate a new one.
+		r = GeneratePassword()
+	End If
+	GeneratePassword = r
+End Function  '' of Function GeneratePassword
 
 
 
