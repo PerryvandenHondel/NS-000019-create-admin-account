@@ -1,22 +1,22 @@
-'
-'	CreateBeheerAccount
-'
-'
-'	Version	Description
-'	=======	================================================================================
-'	12		Use a database as source instead with an Excel sheet
-'	11		New version; works from REC domain
-'	10		Place the function of a beheerder in title field/Place ARGUS=xxxxx in description
-'	09		UUpdate to use Class Splunk_06
-'	08		Updates to use class Splunk_04
-'	07		Added Splunk logging
-'	06		?
-'	05		New version that build command files (.CMD) with DSADD commands in it.
-'	04		?
-'	03		Make use full for multiple domains
-'	02		Add Argus field for export to log file
-'	01		Initial build of script.
-'
+''
+''	CreateBeheerAccount
+''
+''
+''	Version	Description
+''	=======	================================================================================
+''	12		Use a database as source instead with an Excel sheet
+''	11		New version; works from REC domain
+''	10		Place the function of a beheerder in title field/Place ARGUS=xxxxx in description
+''	09		UUpdate to use Class Splunk_06
+''	08		Updates to use class Splunk_04
+''	07		Added Splunk logging
+''	06		?
+''	05		New version that build command files (.CMD) with DSADD commands in it.
+''	04		?
+''	03		Make use full for multiple domains
+''	02		Add Argus field for export to log file
+''	01		Initial build of script.
+''
 ''	CLASSES, FUNCTIONS AND SUBS:
 ''		Class ClassTextFile
 ''		Function AdGetRootDse
@@ -32,6 +32,8 @@
 ''		Function GetScriptPath
 ''		Function GetTempFileName
 ''		Function RunCommand
+''		Function GetDomainValues
+''		Function GetRequestorValues
 ''		Sub	ScriptInit
 ''		Sub CreateNewAccount
 ''		Sub DeleteFile
@@ -60,6 +62,7 @@ Const	FLD_NWA_SUPP_ID = 		"supplier_id"
 Const	FLD_NWA_MOBILE = 		"mobile"
 Const	FLD_NWA_DOMAIN = 		"domain_id"
 Const	FLD_NWA_USERNAME = 		"user_name"
+Const	FLD_NWA_UPN = 			"upn"	
 Const	FLD_NWA_USERNAME_SAME = "user_name_same"
 Const	FLD_NWA_MAIL = 			"mail"
 Const	FLD_NWA_PASSWORD = 		"password"
@@ -75,6 +78,11 @@ Const	FLD_DMN_UPN = 			"upn"
 Const	FLD_DMN_NT = 			"domain_nt"
 Const	FLD_DMN_OU = 			"org_unit"
 Const	FLD_DMN_USE_SUPPLIER_OU = "use_supplier_ou"
+
+Const	TBL_REQ = 				"new_account_requestor"
+Const	FLD_REQ_ID = 			"requestor_id"
+Const	FLD_REQ_TO = 			"mail_to"
+
 
 Const	MAX_ACCOUNT_LEN		=	20
 
@@ -141,6 +149,28 @@ End Function '' of Function GetDomainValues
 
 
 
+
+Function GetRequestorValues(ByVal strRequestorId, ByVal strFieldName)
+	Dim		qs
+	Dim		rs
+	Dim		r	'' Function result
+	
+	qs = "SELECT " & strFieldName & " "
+	qs = qs & "FROM " & TBL_REQ & " "
+	qs = qs & "WHERE " & FLD_REQ_ID & "=" & db.FixStr(strRequestorId) & ";"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		r = ""
+	Else
+		rs.MoveFirst
+		r = rs(strFieldName).Value
+	End If
+	GetRequestorValues = r
+End Function '' of Function GetDomainValues
+
+
+
 Function EncloseWithDQ(ByVal s)
 	''
 	''	Returns an enclosed string s with double quotes around it.
@@ -180,7 +210,7 @@ End Sub '' of Sub SetNotDelegatedFlag
 
 
 
-Sub RecordPrepare(ByVal intStatusId)
+Sub RecordPrepare(ByVal intRecordId, ByVal intStatusId)
 	''
 	'' Prepare all records to fill in the gaps,
 	'' with username, password etc.
@@ -195,21 +225,25 @@ Sub RecordPrepare(ByVal intStatusId)
 	Dim		strFirstName
 	Dim		strMiddleName
 	Dim		strLastName
-	Dim		intRecordId
 	Dim		strSupplierId
 	Dim		strPassword
+	Dim		strDomainId
+	Dim		strUserUpn
 
+	WScript.Echo 
+	WScript.Echo "RecordPrepare()" & String(80, "-")
+	
 	'' Build a select query to get all records with status 0 (all new records)
 	qs = "SELECT * "
 	qs = qs & "FROM " & TBL_NWA & " "
-	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	qs = qs & "WHERE " & FLD_NWA_ID & "=" & intRecordId & " AND " & FLD_NWA_STATUS & "=" & intStatusId & ";"
 	
 	Call db.GetRecordSet(rs, qs)
 	If rs.Eof = True Then
-		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "NO RECORDS FOUND FOR RECORD " & intRecordId
 		WScript.Echo "- " & qs
 	Else
-		WScript.Echo "RECORDS FOUND  FOR STATUS " & intStatusId
+		WScript.Echo "RECORDS FOUND  FOR RECORD " & intRecordId
 		WScript.Echo "- " & qs
 		rs.MoveFirst
 		While Not rs.EOF
@@ -220,9 +254,19 @@ Sub RecordPrepare(ByVal intStatusId)
 			strLastName = rs(FLD_NWA_LNAME).Value
 			strSupplierId = rs(FLD_NWA_SUPP_ID).Value
 			strUserName = GenerateAccountName(strSupplierId, strFirstName, strMiddleName, strLastName)
+			strDomainId = rs(FLD_NWA_DOMAIN).Value
+
+			'' Build the UPN user name lname.vname@domain.ext
+			strUserUpn = LCase(strUserName & "@" & GetDomainValues(strDomainId, FLD_DMN_UPN))
 			
 			strPassword = GeneratePassword()
 			WScript.Echo "strPassword=" & strPassword
+			
+			WScript.Echo "Generated"
+			WScript.Echo "- User name: " & strUserName
+			WScript.Echo "- UPN:       " & strUserUpn
+			WScript.Echo "- Password:  " & strPassword
+			
 			
 			'' The variables are filled with valid values.
 			'' Update the table.
@@ -230,6 +274,7 @@ Sub RecordPrepare(ByVal intStatusId)
 			qu = qu & "SET "
 			qu = qu & FLD_NWA_USERNAME & "=" & db.FixStr(strUserName) & ","
 			qu = qu & FLD_NWA_PASSWORD & "=" & db.FixStr(strPassword) & ","
+			qu = qu & FLD_NWA_UPN & "=" & db.FixStr(strUserUpn) & ","
 			qu = qu & FLD_NWA_STATUS & "=" & NEXT_STATUS & ","
 			qu = qu & FLD_NWA_RLU & "=" & db.FixDtm(Now()) & " "
 			qu = qu & "WHERE " & FLD_NWA_ID & "=" & intRecordId & ";"
@@ -244,7 +289,7 @@ End Sub '' of Sub PrepareRecords
 
 
 
-Sub RecordCreate(ByVal intStatusId)
+Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 	''
 	'' Create new accounts when status is intStatusId
 	''
@@ -253,7 +298,6 @@ Sub RecordCreate(ByVal intStatusId)
 	Dim		c
 	Dim		chrUseSupplierOu
 	Dim		dn
-	Dim		intRecordId
 	Dim		qs			'' Query Select
 	Dim		qu			'' Query Update
 	Dim		rs			'' RecordSet
@@ -277,22 +321,24 @@ Sub RecordCreate(ByVal intStatusId)
 	Dim		strUserUpn
 	Dim		d			'' DN of Default groups.
 
+	WScript.Echo 
+	WScript.Echo "RecordCreate()" & String(80, "-")
+	
 	'' Build a select query to get all records with status 0 (all new records)
 	qs = "SELECT * "
 	qs = qs & "FROM " & TBL_NWA & " "
-	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	qs = qs & "WHERE " & FLD_NWA_ID & "=" & intRecordId & " AND " & FLD_NWA_STATUS & "=" & intStatusId & ";"
 	
 	Call db.GetRecordSet(rs, qs)
 	If rs.Eof = True Then
-		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "NO RECORDS FOUND FOR RECORD ID " & intRecordId
 		WScript.Echo "- " & qs
 	Else
-		WScript.Echo "RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "RECORDS FOUND FOR RECORD ID " & intRecordId
 		WScript.Echo "- " & qs
 		rs.MoveFirst
 		While Not rs.EOF
 			intRecordId = rs(FLD_NWA_ID).Value
-			WScript.Echo String(80, "-")
 			WScript.Echo "RECORD ID="& intRecordId
 			
 			strUserName = rs(FLD_NWA_USERNAME).Value
@@ -303,13 +349,13 @@ Sub RecordCreate(ByVal intStatusId)
 			
 			dn = DsutilsGetDnFromSam(strRootDse, "user", strUserName)
 			
-			If Len(dn) > 0 Then
+			'If Len(dn) > 0 Then
 				'' The result of DsutilsGetDnFromSam contains a DN path, so the account exist
-				WScript.Echo "WARNING: Account " & strUserName & " already exists in " & strRootDse
+			'	WScript.Echo "WARNING: Account " & strUserName & " already exists in " & strRootDse
 				
 				'' Account already exist in the domain.
-				Call RecordSetStatus(intRecordId, intStatusId + 1)
-			Else
+			'	Call RecordSetStatus(intRecordId, intStatusId + 1)
+			'Else
 				'' The account does not exist, create it.
 				
 				strDomainId = rs(FLD_NWA_DOMAIN).Value
@@ -320,8 +366,8 @@ Sub RecordCreate(ByVal intStatusId)
 				
 				chrUseSupplierOu = GetDomainValues(strDomainId, FLD_DMN_USE_SUPPLIER_OU)
 				
-				strUserUpn = LCase(strUserName & "@" & GetDomainValues(strDomainId, FLD_DMN_UPN))
-				WScript.Echo "strUserUpn=" & strUserUpn
+				strUserUpn = rs(FLD_NWA_UPN).Value
+				'WScript.Echo "strUserUpn=" & strUserUpn
 				
 				WScript.Echo strOrgUnit
 				WScript.Echo chrUseSupplierOu
@@ -399,7 +445,7 @@ Sub RecordCreate(ByVal intStatusId)
 				Else
 					WScript.Echo "INFO: No source account was provided so the account has no ROLE groups at this moment"
 				End If
-			End If
+			'End If
 			
 			Call RecordSetStatus(intRecordId, NEXT_STATUS)
 			rs.MoveNext '' Next record
@@ -410,7 +456,7 @@ End Sub '' of Sub RecordCreate
 
 
 
-Sub RecordInform(ByVal intStatusId)
+Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 	''
 	''	Process al records that have status intStatusId
 	''
@@ -421,30 +467,50 @@ Sub RecordInform(ByVal intStatusId)
 	Dim		qs			'' Query Select
 	Dim		qu			'' Query Update
 	Dim		rs			'' RecordSet
-	Dim		intRecordId
+	Dim		strRequestorId
+	Dim		strMailTo
+	Dim		strReference
+	Dim		strUserName
+	Dim		strUserUpn
+	Dim		c
 	
-
 	qs = "SELECT * "
 	qs = qs & "FROM " & TBL_NWA & " "
-	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	qs = qs & "WHERE " & FLD_NWA_ID & "=" & intRecordId & " AND " & FLD_NWA_STATUS & "=" & intStatusId & ";"
 	
 	Call db.GetRecordSet(rs, qs)
 	If rs.Eof = True Then
-		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "NO RECORDS FOUND FOR RECORD ID " & intRecordId
 		WScript.Echo "- " & qs
 	Else
-		WScript.Echo "RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "RECORDS FOUND FOR RECORD ID " & intRecordId
 		WScript.Echo "- " & qs
-		rs.MoveFirst
-		While Not rs.EOF
-			intRecordId = rs(FLD_NWA_ID).Value
-			
-			
+
+		intRecordId = rs(FLD_NWA_ID).Value
+		strRequestorId = rs(FLD_NWA_REQ_ID).Value
+		strReference = rs(FLD_NWA_REF).Value
+		strUserName = rs(FLD_NWA_USERNAME).Value
+		strUserUpn = rs(FLD_NWA_UPN).Value
 		
+		WScript.Echo intRecordId & vbTab & strRequestorId
 		
-			Call RecordSetStatus(intRecordId, NEXT_STATUS)
-			rs.MoveNext '' Next record
-		Wend
+		strMailTo = GetRequestorValues(strRequestorId, FLD_REQ_TO)
+			
+		' blat readme.md -to perry.vandenhondel@ns.nl -f perry.vandenhondel@ns.nl -subject "TEST 1502"  -server vm70as005.rec.nsint -port 25
+		'\tools\bmail.exe -s vm70as005.rec.nsint -p 25 -t "<perry.vandenhondel@ns.nl>" -f "<nsg.hostingadbeheer@ns.nl>" -a "BMAIL TEST 0906" -m README.md
+		
+		c = "r:\tools\blat.exe " & "readme.md "
+		c = c & "-to " & strMailTo & " "
+		c = c & "-f " & "nsg.hostingadbeheer@ns.nl "
+		c = c & "-subject " & EncloseWithDQ("NEW ACCOUNT " & strReference & " " & strUserUpn) & " "
+		c = c & "-server vm70as005.rec.nsint "
+		c = c & "-port 25"
+			
+		WScript.Echo "MAIL COMMAND: " 
+		WScript.Echo c
+	
+		Call RecordSetStatus(intRecordId, NEXT_STATUS)
+
 		Set rs = Nothing
 	End If
 End Sub '' of Sub RecordInfom
@@ -489,7 +555,47 @@ Sub	ScriptInit()
 End Sub
 
 
+
 Sub ScriptRun()
+	Dim		rs
+	Dim		qs
+	Dim		intRecordId
+	Dim		strRequestorId
+	Dim		intStatusId
+	
+	
+	'' Start with the new accounts, status = 0
+	intStatusId = 0
+	
+	qs = "SELECT * "
+	qs = qs & "FROM " & TBL_NWA & " "
+	qs = qs & "WHERE " & FLD_NWA_STATUS & "=" & intStatusId & ";"
+	
+	Call db.GetRecordSet(rs, qs)
+	If rs.Eof = True Then
+		WScript.Echo "NO RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
+	Else
+		WScript.Echo "RECORDS FOUND FOR STATUS " & intStatusId
+		WScript.Echo "- " & qs
+		rs.MoveFirst
+		While Not rs.EOF
+			intRecordId = rs(FLD_NWA_ID).Value
+			'strRequestorId = rs(FLD_NWA_REQ_ID).Value
+			WScript.Echo "Processing record: " & intRecordId
+			
+			Call RecordPrepare(intRecordId, 0)
+			Call RecordCreate(intRecordId, 100)
+			Call RecordInform(intRecordId, 200)
+				
+			rs.MoveNext '' Next record
+		Wend
+		Set rs = Nothing
+	End If
+End Sub '' of Sub ScriptRun
+
+
+Sub ScriptRunOld()
 	Const	COL_FIRST	=	1
 	Const	COL_MIDDLE	=	2
 	Const	COL_LAST	=	3 
@@ -522,8 +628,6 @@ Sub ScriptRun()
 	Dim		strPassword
 	Dim		strPreWin2000
 	Dim		strRequestedBy
-	
-
 	
 	WScript.Echo 
 	
@@ -623,9 +727,8 @@ Sub ScriptRun()
 		'intRow = intRow + 1
 	'Loop
 	
-	Call RecordPrepare(0)
-	Call RecordCreate(100)
-	Call RecordInform(200)
+	Dim	qs
+	Dim	rs
 End Sub ' ScriptRun
 
 
@@ -807,7 +910,7 @@ Sub CreateNewAccount(ByVal strFirstName, ByVal strMiddleName, ByVal strLastName,
 	c = c & "-title " & Chr(34) & strTitle & Chr(34) & " "
 	c = c & "-desc " & Chr(34) & strDescription & Chr(34) & " "
 	c = c & "-display " & Chr(34) & strAccountName & Chr(34) & " "
-	c = c & "-upn " & Chr(34) & strUpn & Chr(34) & " "
+	c = c & "-upn " & Chr(34) & strUserUpn & Chr(34) & " "
 	c = c & "-mobile " & Chr(34) & strMobile & Chr(34) & " "
 	c = c & "-company " & Chr(34) & strCompany & Chr(34) & " "
 	c = c & "-mustchpwd yes"
@@ -870,7 +973,8 @@ Sub MakeSameAs(ByVal s, ByVal d)
 	WScript.Echo "MakeSameAs()"
 
 	'	Get a temp file name to store the group DN's
-	strPathTemp = GetTempFileName()
+	'strPathTemp = GetTempFileName()
+	strPathTemp = "temp-makesameas.txt"
 	
 	i = 0
 	
