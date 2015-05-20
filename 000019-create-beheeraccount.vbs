@@ -472,7 +472,16 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 	Dim		strReference
 	Dim		strUserName
 	Dim		strUserUpn
+	Dim		strFName
+	Dim		strPassword
+	Dim		strDomainId
 	Dim		c
+	Dim		tf
+	Dim		strPathBody
+	Dim		strUserNameSame
+	
+	WScript.Echo 
+	WScript.Echo "RecordInform()" & String(80, "-")
 	
 	qs = "SELECT * "
 	qs = qs & "FROM " & TBL_NWA & " "
@@ -491,15 +500,46 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		strReference = rs(FLD_NWA_REF).Value
 		strUserName = rs(FLD_NWA_USERNAME).Value
 		strUserUpn = rs(FLD_NWA_UPN).Value
+		strFName = rs(FLD_NWA_FNAME).Value
+		strPassword = rs(FLD_NWA_PASSWORD).Value
+		strDomainId = rs(FLD_NWA_DOMAIN).Value
+		strUserNameSame = rs(FLD_NWA_USERNAME_SAME).Value
+		
+		'' Create a text file that will be used to make the body of the message.
+		strPathBody = intRecordId & ".txt"
+		Set tf = New ClassTextFile
+		tf.SetMode(FOR_WRITING)
+		tf.SetPath(strPathBody)
+		tf.OpenFile()
 		
 		WScript.Echo intRecordId & vbTab & strRequestorId
+
+		tf.WriteLineToFile("New account created for " & strFName )
+		tf.WriteLineToFile("")
+		tf.WriteLineToFile("Reference:        " & strReference)
+		tf.WriteLineToFile("")
+		tf.WriteLineToFile("User name UPN:    " & strUserUpn)
+		tf.WriteLineToFile("User name NT:     " & GetDomainValues(strDomainId, FLD_DMN_NT) & "\" & strUserName)
+		tf.WriteLineToFile("Initial password: " & strPassword)
+		tf.WriteLineToFile("")
+		
+		If Len(strUserNameSame) > 0 Then
+			'' There is a SameUser specified, groups hava been copied over to this user.
+			
+			tf.WriteLineToFile("Groups have been copied from user " & strUserNameSame)
+			tf.WriteLineToFile("")
+		End If
 		
 		strMailTo = GetRequestorValues(strRequestorId, FLD_REQ_TO)
 			
-		' blat readme.md -to perry.vandenhondel@ns.nl -f perry.vandenhondel@ns.nl -subject "TEST 1502"  -server vm70as005.rec.nsint -port 25
-		'\tools\bmail.exe -s vm70as005.rec.nsint -p 25 -t "<perry.vandenhondel@ns.nl>" -f "<nsg.hostingadbeheer@ns.nl>" -a "BMAIL TEST 0906" -m README.md
+		'' Close the text file
+		tf.CloseFile
+		Set tf = Nothing
 		
-		c = "r:\tools\blat.exe " & "readme.md "
+		'\tools\bmail.exe -s vm70as005.rec.nsint -p 25 -t "<perry.vandenhondel@ns.nl>" -f "<nsg.hostingadbeheer@ns.nl>" -a "BMAIL TEST 0906" -m README.md
+		' blat readme.md -to perry.vandenhondel@ns.nl -f perry.vandenhondel@ns.nl -subject "TEST 1502"  -server vm70as005.rec.nsint -port 25
+
+		c = "r:\tools\blat.exe " & strPathBody & " "
 		c = c & "-to " & strMailTo & " "
 		c = c & "-f " & "nsg.hostingadbeheer@ns.nl "
 		c = c & "-subject " & EncloseWithDQ("NEW ACCOUNT " & strReference & " " & strUserUpn) & " "
@@ -508,7 +548,9 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 			
 		WScript.Echo "MAIL COMMAND: " 
 		WScript.Echo c
-	
+		
+		Call RunCommand(c)
+		
 		Call RecordSetStatus(intRecordId, NEXT_STATUS)
 
 		Set rs = Nothing
@@ -581,6 +623,9 @@ Sub ScriptRun()
 		rs.MoveFirst
 		While Not rs.EOF
 			intRecordId = rs(FLD_NWA_ID).Value
+			
+			
+			
 			'strRequestorId = rs(FLD_NWA_REQ_ID).Value
 			WScript.Echo "Processing record: " & intRecordId
 			
@@ -1504,7 +1549,7 @@ Class ClassTextFile
 	'		Public Sub SetMode							Set the mode of access for the file (READ, WRITE, APPEND)
 	'		Public Sub OpenFile							Open the file
 	'		Public Sub CloseFile						Closes the file
-	'		Public Sub WriteToFile(ByVal strLine)		Write a line to the file
+	'		Public Sub WriteLineToFile(ByVal strLine)	Write a line to the file
 	'		Public Function ReadFromFile()				Read a line from the  file
 	'		Public Sub DeleteFile						Delete the file
 	'		Function IsEndOfFile						Boolean returns the end of the file reached
