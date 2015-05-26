@@ -192,7 +192,7 @@ End Function '' of Function EncloseWithDQ
 
 
 
-Sub RecordAddActionCreated(ByVal strUpn, ByVal strReferenceId)
+Sub RecordAddActionAccount(ByVal strUpn, ByVal strActionDescription, ByVal strReferenceId)
 	''
 	''	Add an new record to the account action table for new accounts
 	''
@@ -210,12 +210,12 @@ Sub RecordAddActionCreated(ByVal strUpn, ByVal strReferenceId)
 	qi = qi & "SET "
 	qi = qi & FLD_ACC_UPN & "=" & db.FixStr(LCase(strUpn)) & ","
 	qi = qi & FLD_ACC_REF & "=" & db.FixStr(strReferenceId) & ","
-	qi = qi & FLD_ACC_ACTION & "=" & db.FixStr("New account created") & ","
+	qi = qi & FLD_ACC_ACTION & "=" & db.FixStr(strActionDescription) & ","
 	qi = qi & FLD_ACC_RCD & "=" & db.FixDtm(Now()) & ","
 	qi = qi & FLD_ACC_RLU & "=" & db.FixDtm(Now()) & ";"
 	
 	db.ExecQuery(qi)
-End Sub '' of Sub RecordAddActionCreated
+End Sub '' of Sub RecordAddActionAccount
 
 
 
@@ -441,6 +441,9 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 				WScript.Echo c
 				gobjShell.Run "cmd /c " & c, 0, True
 				
+				
+				Call RecordAddActionAccount(strUserUpn, "New account created", strReference)
+				
 				'' Sleap for 2 seconds before continuing
 				WScript.Sleep 2000
 				
@@ -451,14 +454,20 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 					'' Add default group ROL_SmartXS_Autorisatie
 					d = DsutilsGetDnFromSam(strDomainId, "group", "RP_SmartXS_Autorisatie") ' Was ROL_SmartXS_Autorisatie
 					Call DsmodGroupAddMember(d, strUserDn)
+					
+					Call RecordAddActionAccount(strUserUpn, "Added to group RP_SmartXS_Autorisatie", strReference)
 
 					'' Add default group for BONS Autorisatie
 					d = DsutilsGetDnFromSam(strDomainId, "group", "RP_BONS_Autorisatie") ' 2014-12-29 PVDH Kan de groep niet vinden in PROD.NS.NL
 					Call DsmodGroupAddMember(d, strUserDn)
+					
+					Call RecordAddActionAccount(strUserUpn, "Added to group RP_BONS_Autorisatie", strReference)
 				End If
 				
 				'' Set the not delegated flag on the user account by poking UserAccountControl
-				Call SetNotDelegatedFlag(strDomainId, strUserName)			
+				Call SetNotDelegatedFlag(strDomainId, strUserName)
+				
+				Call RecordAddActionAccount(strUserUpn, "Set userAccountControl flag for 'Account Not delegated' (=1048576)", strReference)
 
 				'' Make the account similar as a reference account
 				strUserNameSame = rs(FLD_NWA_USERNAME_SAME).Value
@@ -472,7 +481,7 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 						WScript.Echo "WARNING: The account provided as a reference does not exist (" & strUserNameSame & ")"
 					Else
 						'' Now copy the groups from strUserNameSameDn to strUserDn
-						Call MakeSameAs(strUserNameSameDn, strUserDn)
+						Call MakeSameAs(strUserNameSameDn, strUserDn, strUserUpn, strReference)
 					End If
 				Else
 					WScript.Echo "INFO: No source account was provided so the account has no ROLE groups at this moment, only the default"
@@ -483,7 +492,7 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 			rs.MoveNext '' Next record
 			
 			'' Add a record to the table account_action 
-			Call RecordAddActionCreated(strUserUpn, strReference)
+			
 			
 		Wend
 		Set rs = Nothing
@@ -1055,14 +1064,14 @@ End Sub ' CreateNewAccount
 
 
 
-Sub MakeSameAs(ByVal s, ByVal d)
-	'
-	'	Copy all groups from s to d
-	'	
-	'	s		Source DN
-	'	d		Destionation DN
-	'
-		
+Sub MakeSameAs(ByVal s, ByVal d, ByVal strUpn, ByVal strReferenceId)
+	''
+	''	Copy all groups from s to d
+	''	
+	''	s		Source DN
+	''	d		Destination DN
+	''
+
 	Dim		c
 	Dim		strPathTemp
 	Dim		f
@@ -1090,9 +1099,13 @@ Sub MakeSameAs(ByVal s, ByVal d)
 			l = ts.ReadLine
 			If InStr(l, "CN=") > 0 Then
 				c = "dsmod.exe group " & l & " -addmbr " & d
+				
 				WScript.Echo c
-				i = i + 1
 				gobjShell.Run "cmd /c " & c, 0, True
+
+				Call RecordAddActionAccount(strUpn, "Added to group " & l, strReferenceId)
+
+				i = i + 1
 			End If
 		Loop
 		f.Close
