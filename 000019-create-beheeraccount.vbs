@@ -192,6 +192,34 @@ End Function '' of Function EncloseWithDQ
 
 
 
+Sub RecordAddActionCreated(ByVal strUpn, ByVal strReferenceId)
+	''
+	''	Add an new record to the account action table for new accounts
+	''
+	Const	TBL_AAC = 			"account_action"
+	Const	FLD_ACC_ID = 		"account_action_id"
+	Const	FLD_ACC_UPN = 		"upn"
+	Const	FLD_ACC_ACTION = 	"action_performed"
+	Const	FLD_ACC_REF = 		"reference_id"
+	Const	FLD_ACC_RCD = 		"rcd"
+	Const	FLD_ACC_RLU = 		"rlu"
+	
+	Dim		qi
+	
+	qi = "INSERT INTO " & TBL_AAC & " "
+	qi = qi & "SET "
+	qi = qi & FLD_ACC_UPN & "=" & db.FixStr(LCase(strUpn)) & ","
+	qi = qi & FLD_ACC_REF & "=" & db.FixStr(strReferenceId) & ","
+	qi = qi & FLD_ACC_ACTION & "=" & db.FixStr("New account created") & ","
+	qi = qi & FLD_ACC_RCD & "=" & db.FixDtm(Now()) & ","
+	qi = qi & FLD_ACC_RLU & "=" & db.FixDtm(Now()) & ";"
+	
+	db.ExecQuery(qi)
+End Sub '' of Sub RecordAddActionCreated
+
+
+
+
 Sub SetNotDelegatedFlag(ByVal strDomainId, ByVal strUserName)
 	''
 	''	Set the not delegated flag in the UserAccountControl
@@ -453,6 +481,10 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 			
 			Call RecordSetStatus(intRecordId, NEXT_STATUS)
 			rs.MoveNext '' Next record
+			
+			'' Add a record to the table account_action 
+			Call RecordAddActionCreated(strUserUpn, strReference)
+			
 		Wend
 		Set rs = Nothing
 	End If
@@ -563,6 +595,7 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		c = "blat.exe " & strPathBody & " "
 		c = c & "-to " & EncloseWithDQ(strMailTo) & " "
 		c = c & "-f " & EncloseWithDQ("nsg.hostingadbeheer@ns.nl") & " "
+		c = c & "-bcc " & EncloseWithDQ("perry.vandenhondel@ns.nl") & " "
 		c = c & "-subject " & EncloseWithDQ("New administrative account " & strUserUpn & " / " & strReference) & " "
 		c = c & "-server vm70as005.rec.nsint "
 		c = c & "-port 25"
@@ -577,6 +610,7 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		Set rs = Nothing
 	End If
 End Sub '' of Sub RecordInfom
+
 
 
 Sub	ScriptInit()
