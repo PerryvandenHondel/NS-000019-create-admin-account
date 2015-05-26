@@ -440,10 +440,14 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 					'' Get the DN of the source user
 					strUserNameSameDn = DsutilsGetDnFromSam(strDomainId, "user", strUserNameSame)
 					
-					'' Now copy the groups from strUserNameSameDn to strUserDn
-					Call MakeSameAs(strUserNameSameDn, strUserDn)
+					If Len(strUserNameSameDn) = 0 Then
+						WScript.Echo "WARNING: The account provided as a reference does not exist (" & strUserNameSame & ")"
+					Else
+						'' Now copy the groups from strUserNameSameDn to strUserDn
+						Call MakeSameAs(strUserNameSameDn, strUserDn)
+					End If
 				Else
-					WScript.Echo "INFO: No source account was provided so the account has no ROLE groups at this moment"
+					WScript.Echo "INFO: No source account was provided so the account has no ROLE groups at this moment, only the default"
 				End If
 			'End If
 			
@@ -473,6 +477,9 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 	Dim		strUserName
 	Dim		strUserUpn
 	Dim		strFName
+	Dim		strMName
+	Dim		strLName
+	Dim		strFullName
 	Dim		strPassword
 	Dim		strDomainId
 	Dim		c
@@ -501,9 +508,19 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		strUserName = rs(FLD_NWA_USERNAME).Value
 		strUserUpn = rs(FLD_NWA_UPN).Value
 		strFName = rs(FLD_NWA_FNAME).Value
+		strMName = rs(FLD_NWA_MNAME).Value
+		strLName = rs(FLD_NWA_LNAME).Value
+		
 		strPassword = rs(FLD_NWA_PASSWORD).Value
 		strDomainId = rs(FLD_NWA_DOMAIN).Value
 		strUserNameSame = rs(FLD_NWA_USERNAME_SAME).Value
+		
+		'' Build the full name.
+		strFullName = strFName
+		If Len(strMName) > 0 Then
+			strFullName = strFullName & " " & strMName
+		End If
+		strFullName = strFullName & " " & strLName
 		
 		'' Create a text file that will be used to make the body of the message.
 		strPathBody = intRecordId & ".txt"
@@ -514,9 +531,9 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		
 		WScript.Echo intRecordId & vbTab & strRequestorId
 
-		tf.WriteLineToFile("New account created for " & strFName )
+		tf.WriteLineToFile("New account created for " & strFullName)
 		tf.WriteLineToFile("")
-		tf.WriteLineToFile("Reference:        " & strReference)
+		tf.WriteLineToFile("Requested under:  " & strReference)
 		tf.WriteLineToFile("")
 		tf.WriteLineToFile("User name UPN:    " & strUserUpn)
 		tf.WriteLineToFile("User name NT:     " & GetDomainValues(strDomainId, FLD_DMN_NT) & "\" & strUserName)
@@ -524,25 +541,29 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		tf.WriteLineToFile("")
 		
 		If Len(strUserNameSame) > 0 Then
-			'' There is a SameUser specified, groups hava been copied over to this user.
+			'' There is a SameUser specified, groups have been copied over to this user.
 			
-			tf.WriteLineToFile("Groups have been copied from user " & strUserNameSame)
+			tf.WriteLineToFile("Groups have been copied from user " & GetDomainValues(strDomainId, FLD_DMN_NT) & "\" & strUserNameSame)
 			tf.WriteLineToFile("")
 		End If
 		
-		strMailTo = GetRequestorValues(strRequestorId, FLD_REQ_TO)
-			
 		'' Close the text file
 		tf.CloseFile
 		Set tf = Nothing
 		
-		'\tools\bmail.exe -s vm70as005.rec.nsint -p 25 -t "<perry.vandenhondel@ns.nl>" -f "<nsg.hostingadbeheer@ns.nl>" -a "BMAIL TEST 0906" -m README.md
+		WScript.Sleep 1000
+		
+		'c = "adfind.exe -b "
+	
+		strMailTo = GetRequestorValues(strRequestorId, FLD_REQ_TO)
+			
+		
 		' blat readme.md -to perry.vandenhondel@ns.nl -f perry.vandenhondel@ns.nl -subject "TEST 1502"  -server vm70as005.rec.nsint -port 25
 
-		c = "r:\tools\blat.exe " & strPathBody & " "
-		c = c & "-to " & strMailTo & " "
-		c = c & "-f " & "nsg.hostingadbeheer@ns.nl "
-		c = c & "-subject " & EncloseWithDQ("NEW ACCOUNT " & strReference & " " & strUserUpn) & " "
+		c = "blat.exe " & strPathBody & " "
+		c = c & "-to " & EncloseWithDQ(strMailTo) & " "
+		c = c & "-f " & EncloseWithDQ("nsg.hostingadbeheer@ns.nl") & " "
+		c = c & "-subject " & EncloseWithDQ("New administrative account " & strUserUpn & " / " & strReference) & " "
 		c = c & "-server vm70as005.rec.nsint "
 		c = c & "-port 25"
 			
@@ -1019,7 +1040,7 @@ Sub MakeSameAs(ByVal s, ByVal d)
 
 	'	Get a temp file name to store the group DN's
 	'strPathTemp = GetTempFileName()
-	strPathTemp = "temp-makesameas.txt"
+	strPathTemp = "makesameas.tmp"
 	
 	i = 0
 	
