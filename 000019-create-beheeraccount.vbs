@@ -271,16 +271,20 @@ Sub RecordPrepare(ByVal intRecordId, ByVal intStatusId)
 		WScript.Echo "NO RECORDS FOUND FOR RECORD " & intRecordId
 		WScript.Echo "- " & qs
 	Else
-		WScript.Echo "RECORDS FOUND  FOR RECORD " & intRecordId
+		WScript.Echo "RECORDS FOUND FOR RECORD " & intRecordId
 		WScript.Echo "- " & qs
 		rs.MoveFirst
 		While Not rs.EOF
 			intRecordId = rs(FLD_NWA_ID).Value
+			WScript.Echo "intRecordId=" & intRecordId
 			
 			strFirstName = rs(FLD_NWA_FNAME).Value
 			strMiddleName = rs(FLD_NWA_MNAME).Value
 			strLastName = rs(FLD_NWA_LNAME).Value
 			strSupplierId = rs(FLD_NWA_SUPP_ID).Value
+		
+			WScript.Echo strFirstName
+
 			strUserName = GenerateAccountName(strSupplierId, strFirstName, strMiddleName, strLastName)
 			strDomainId = rs(FLD_NWA_DOMAIN).Value
 
@@ -578,7 +582,10 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		tf.WriteLineToFile("")
 		tf.WriteLineToFile("User name UPN:    " & strUserUpn)
 		tf.WriteLineToFile("User name NT:     " & GetDomainValues(strDomainId, FLD_DMN_NT) & "\" & strUserName)
+		tf.WriteLineToFile("")
 		tf.WriteLineToFile("Initial password: " & strPassword)
+		tf.WriteLineToFile("")
+		tf.WriteLineToFile("ADBEHEERID:       " & intRecordId)
 		tf.WriteLineToFile("")
 		
 		If Len(strUserNameSame) > 0 Then
@@ -587,6 +594,13 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 			tf.WriteLineToFile("Groups have been copied from user " & GetDomainValues(strDomainId, FLD_DMN_NT) & "\" & strUserNameSame)
 			tf.WriteLineToFile("")
 		End If
+		
+		tf.WriteLineToFile("")
+		tf.WriteLineToFile("IMPORTANT INFORMATION FOR THE USER OF THIS ACCOUNT:")
+		tf.WriteLineToFile("1) An account needs to be used once a month. Also when no work is done with this account, this logon action is mandatory.")
+		tf.WriteLineToFile("2) When an account is not used for more then 90 days it will be disabled, enable using an Argusweb request.")
+		tf.WriteLineToFile("3) When an account is not used for more then 180 days it will be deleted.")
+		tf.WriteLineToFile("")
 		
 		'' Close the text file
 		tf.CloseFile
@@ -612,10 +626,10 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		WScript.Echo "MAIL COMMAND: " 
 		WScript.Echo c
 		
-		Call RunCommand(c)
+		If RunCommand(c) = 0 Then
+			Call RecordSetStatus(intRecordId, NEXT_STATUS)
+		End If
 		
-		Call RecordSetStatus(intRecordId, NEXT_STATUS)
-
 		Set rs = Nothing
 	End If
 End Sub '' of Sub RecordInfom
@@ -687,8 +701,6 @@ Sub ScriptRun()
 		rs.MoveFirst
 		While Not rs.EOF
 			intRecordId = rs(FLD_NWA_ID).Value
-			
-			
 			
 			'strRequestorId = rs(FLD_NWA_REQ_ID).Value
 			WScript.Echo "Processing record: " & intRecordId
@@ -1196,8 +1208,8 @@ Function GenerateAccountName(ByVal strCompany, ByVal strFirstName, ByVal strMidd
 	Dim	strAccountName
 	Dim	intLen
 	
-	'WScript.Echo 
-	'WScript.Echo "GenerateAccountName: " & strCompany & vbTab & "FN:" & strFirstName & vbTab & "MN:" & strMiddleName & vbTab & "LN:" & strLastName
+	WScript.Echo 
+	WScript.Echo "GenerateAccountName: " & strCompany & vbTab & "FN:" & strFirstName & vbTab & "MN:" & strMiddleName & vbTab & "LN:" & strLastName
 
 	strFirstName = FixFirstName(strFirstName)
 	
@@ -1300,7 +1312,8 @@ End Function ' FixLastname()
 
 
 Function FixFirstName(strName)
-	' Remove all quote's (') in the last name.
+	WScript.Echo "FixFirstName(): " & strName
+	' Remove all quote's (') in the first name.
 	strName = Replace(strName, " ", "")
 	
 	' Remove all '-' in the last name.
