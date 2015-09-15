@@ -446,7 +446,7 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 				gobjShell.Run "cmd /c " & c, 0, True
 				
 				
-				Call RecordAddActionAccount(strUserUpn, "New account created", strReference)
+				''Call RecordAddActionAccount(strUserUpn, "New account created", strReference)
 				
 				'' Sleap for 2 seconds before continuing
 				WScript.Sleep 2000
@@ -459,19 +459,19 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 					d = DsutilsGetDnFromSam(strDomainId, "group", "RP_SmartXS_Autorisatie") ' Was ROL_SmartXS_Autorisatie
 					Call DsmodGroupAddMember(d, strUserDn)
 					
-					Call RecordAddActionAccount(strUserUpn, "Added to group RP_SmartXS_Autorisatie", strReference)
+					''Call RecordAddActionAccount(strUserUpn, "Added to group RP_SmartXS_Autorisatie", strReference)
 
 					'' Add default group for BONS Autorisatie
 					d = DsutilsGetDnFromSam(strDomainId, "group", "RP_BONS_Autorisatie") ' 2014-12-29 PVDH Kan de groep niet vinden in PROD.NS.NL
 					Call DsmodGroupAddMember(d, strUserDn)
 					
-					Call RecordAddActionAccount(strUserUpn, "Added to group RP_BONS_Autorisatie", strReference)
+					'' Call RecordAddActionAccount(strUserUpn, "Added to group RP_BONS_Autorisatie", strReference)
 				End If
 				
 				'' Set the not delegated flag on the user account by poking UserAccountControl
 				Call SetNotDelegatedFlag(strDomainId, strUserName)
 				
-				Call RecordAddActionAccount(strUserUpn, "Set userAccountControl flag for 'Account Not delegated' (=1048576)", strReference)
+				''Call RecordAddActionAccount(strUserUpn, "Set userAccountControl flag for 'Account Not delegated' (=1048576)", strReference)
 
 				'' Make the account similar as a reference account
 				strUserNameSame = rs(FLD_NWA_USERNAME_SAME).Value
@@ -574,11 +574,11 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		tf.SetPath(strPathBody)
 		tf.OpenFile()
 		
-		WScript.Echo intRecordId & vbTab & strRequestorId
+		WScript.Echo "RecNr+ReqId: " & intRecordId & vbTab & strRequestorId
 
 		tf.WriteLineToFile("New account created for " & strFullName)
 		tf.WriteLineToFile("")
-		tf.WriteLineToFile("Requested under:  " & strReference)
+		tf.WriteLineToFile("Requested under:  " & strReference) & " by " & strRequestorId
 		tf.WriteLineToFile("")
 		tf.WriteLineToFile("User name UPN:    " & strUserUpn)
 		tf.WriteLineToFile("User name NT:     " & GetDomainValues(strDomainId, FLD_DMN_NT) & "\" & strUserName)
@@ -611,6 +611,7 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		'c = "adfind.exe -b "
 	
 		strMailTo = GetRequestorValues(strRequestorId, FLD_REQ_TO)
+		''strMailTo = strRequestorId
 			
 		
 		' blat readme.md -to perry.vandenhondel@ns.nl -f perry.vandenhondel@ns.nl -subject "TEST 1502"  -server vm70as005.rec.nsint -port 25
@@ -618,8 +619,8 @@ Sub RecordInform(ByVal intRecordId, ByVal intStatusId)
 		c = "blat.exe " & strPathBody & " "
 		c = c & "-to " & EncloseWithDQ(strMailTo) & " "
 		c = c & "-f " & EncloseWithDQ("nsg.hostingadbeheer@ns.nl") & " "
-		c = c & "-bcc " & EncloseWithDQ("perry.vandenhondel@ns.nl") & " "
-		c = c & "-subject " & EncloseWithDQ("New administrative account " & strUserUpn & " / " & strReference) & " "
+		c = c & "-bcc " & EncloseWithDQ("perry.vandenhondel@ns.nl,paul.geertman@ns.nl") & " "
+		c = c & "-subject " & EncloseWithDQ("ADB-19-" & intRecordId & "/New administrative account " & strUserUpn & " / " & strReference) & " "
 		c = c & "-server vm70as005.rec.nsint "
 		c = c & "-port 25"
 			
@@ -1115,7 +1116,7 @@ Sub MakeSameAs(ByVal s, ByVal d, ByVal strUpn, ByVal strReferenceId)
 				WScript.Echo c
 				gobjShell.Run "cmd /c " & c, 0, True
 
-				Call RecordAddActionAccount(strUpn, "Added to group " & l, strReferenceId)
+				''Call RecordAddActionAccount(strUpn, "Added to group " & l, strReferenceId)
 
 				i = i + 1
 			End If
