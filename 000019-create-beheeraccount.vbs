@@ -69,6 +69,7 @@ Const	FLD_NWA_PASSWORD = 		"password"
 Const	FLD_NWA_REF = 			"reference_number"
 Const	FLD_NWA_REQ_ID = 		"requestor_id"
 Const	FLD_NWA_STATUS = 		"status_id"
+Const	FLD_NWA_DN = 			"dn"
 Const	FLD_NWA_RCD = 			"rcd"
 Const	FLD_NWA_RLU = 			"rlu"
 
@@ -294,11 +295,10 @@ Sub RecordPrepare(ByVal intRecordId, ByVal intStatusId)
 			strPassword = GeneratePassword()
 			WScript.Echo "strPassword=" & strPassword
 			
-			WScript.Echo "Generated"
+			WScript.Echo "Generated:"
 			WScript.Echo "- User name: " & strUserName
 			WScript.Echo "- UPN:       " & strUserUpn
 			WScript.Echo "- Password:  " & strPassword
-			
 			
 			'' The variables are filled with valid values.
 			'' Update the table.
@@ -411,6 +411,13 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 				strUserDn = strUserDn & strOrgUnit & "," & strDomainId
 				WScript.Echo "User DN=" & strUserDn
 				
+				'' Add the User DN to the database table TBL_NWA
+				qu = "UPDATE " & TBL_NWA & " "
+				qu = qu + "SET "
+				qu = qu + FLD_NWA_DN & "=" & db.FixStr(strUserDn) & " "
+				qu = qu + "WHERE " & FLD_NWA_ID & "=" & intRecordId & ";"
+				db.ExecQuery(qu)
+				
 				strReference = rs(FLD_NWA_REF).Value
 				strRequestor = rs(FLD_NWA_REQ_ID).Value
 				strDescription = "CALL=" & strReference & " REQUEST_BY=" & strRequestor
@@ -496,8 +503,6 @@ Sub RecordCreate(ByVal intRecordId, ByVal intStatusId)
 			rs.MoveNext '' Next record
 			
 			'' Add a record to the table account_action 
-			
-			
 		Wend
 		Set rs = Nothing
 	End If
